@@ -5,6 +5,10 @@ import type { SubscriptionTier } from '@/types';
 const VALID_TIERS: SubscriptionTier[] = ['free', 'steward', 'naturalist', 'conservationist'];
 
 export async function POST(req: NextRequest) {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'Not available in production' }, { status: 403 });
+  }
+
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
