@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import type { Map as MapboxMap, MapMouseEvent } from 'mapbox-gl';
+import type { Feature } from 'geojson';
 
 interface DrawablePropertyMapProps {
   address: string;
@@ -14,7 +16,7 @@ export default function DrawablePropertyMap({
   className = '',
 }: DrawablePropertyMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
+  const mapRef = useRef<MapboxMap | null>(null);
   const [points, setPoints] = useState<[number, number][]>([]);
   const [acreage, setAcreage] = useState(0);
   const [geocoding, setGeocoding] = useState(true);
@@ -41,11 +43,11 @@ export default function DrawablePropertyMap({
   }, []);
 
   // ── Sync drawing to map sources ───────────────────────────────────────────
-  const syncToMap = useCallback((map: any, pts: [number, number][]) => {
+  const syncToMap = useCallback((map: MapboxMap, pts: [number, number][]) => {
     const src = map.getSource('drawing');
-    if (!src) return;
+    if (!src || src.type !== 'geojson') return;
 
-    const features: any[] = [];
+    const features: Feature[] = [];
 
     // Filled polygon (3+ points)
     if (pts.length >= 3) {
@@ -83,7 +85,7 @@ export default function DrawablePropertyMap({
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) { setGeocoding(false); return; }
 
-    let map: any;
+    let map: MapboxMap;
 
     (async () => {
       // 1. Geocode address → center
@@ -156,7 +158,7 @@ export default function DrawablePropertyMap({
         });
 
         // Click to add boundary point
-        map.on('click', (e: any) => {
+        map.on('click', (e: MapMouseEvent) => {
           const newPt: [number, number] = [e.lngLat.lng, e.lngLat.lat];
           const next = [...pointsRef.current, newPt];
           pointsRef.current = next;

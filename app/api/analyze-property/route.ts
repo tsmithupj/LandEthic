@@ -31,17 +31,22 @@ async function getHardinessZone(lat: number, lng: number): Promise<string | null
 }
 
 // ─── USDA soil data via UC Davis SoilWeb API ──────────────────────────────
+interface SoilMapUnit {
+  muname?: string;
+  mukey?: string;
+}
+
 async function getSoilData(lat: number, lng: number): Promise<string | null> {
   try {
     const res = await fetch(
       `https://casoilresource.lawr.ucdavis.edu/api/mapunit/?lon=${lng}&lat=${lat}&key=rhizeome&format=json`
     );
     if (!res.ok) return null;
-    const data = await res.json();
+    const data: unknown = await res.json();
     if (!data || !Array.isArray(data) || data.length === 0) return null;
-    return data
+    return (data as SoilMapUnit[])
       .slice(0, 2)
-      .map((mu: any) => `${mu.muname ?? 'Unknown'} (${mu.mukey ?? ''})`)
+      .map((mu) => `${mu.muname ?? 'Unknown'} (${mu.mukey ?? ''})`)
       .join(', ');
   } catch {
     return null;

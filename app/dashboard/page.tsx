@@ -79,6 +79,11 @@ function TaskRow({ task }: { task: ActionTask }) {
       });
       if (!res.ok) throw new Error('Failed');
       const data = await res.json() as { task: ActionTask };
+      await fetch(`/api/tasks/${task.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data.task),
+      });
       replaceTask(task.id, data.task);
     } catch {
       setReplacing(false);
@@ -352,7 +357,7 @@ export default function DashboardPage() {
     property, plan, insights, boundary, address,
     propertyEntries, activePropertyId, switchProperty,
     tier, canAddProperty, reset,
-    userGoalsText, setUserGoalsText, analyzeAndPlan, regeneratePlan, isAnalyzing,
+    userGoalsText, setUserGoalsText, regeneratePlan, isAnalyzing,
   } = useStore();
   const [activeInsightIndex, setActiveInsightIndex] = useState<number | null>(null);
   const [editingGoals, setEditingGoals] = useState(false);
@@ -386,7 +391,6 @@ export default function DashboardPage() {
   const userTierIdx = TIER_ORDER_DASH.indexOf(tier);
   const freeTasks = plan?.tasks.filter((t) => TIER_ORDER_DASH.indexOf(t.tier) <= userTierIdx) ?? [];
   const lockedTasks = plan?.tasks.filter((t) => TIER_ORDER_DASH.indexOf(t.tier) > userTierIdx) ?? [];
-  const completedCount = freeTasks.filter((t) => t.completed).length;
 
   return (
     <div className="min-h-screen bg-gray-50">

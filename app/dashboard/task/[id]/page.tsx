@@ -97,6 +97,11 @@ export default function TaskDetailPage() {
       });
       if (!res.ok) throw new Error('Failed');
       const data = await res.json() as { task: ActionTask };
+      await fetch(`/api/tasks/${task.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data.task),
+      });
       replaceTask(task.id, data.task);
       router.push('/dashboard');
     } catch {
@@ -150,7 +155,7 @@ export default function TaskDetailPage() {
       const data = await res.json() as { reply?: string; error?: string };
       if (data.error) throw new Error(data.error);
       setChatMessages([...newMessages, { role: 'assistant', content: data.reply ?? '' }]);
-    } catch (err) {
+    } catch {
       setChatMessages([...newMessages, { role: 'assistant', content: 'Sorry, something went wrong. Try again.' }]);
     } finally {
       setChatLoading(false);

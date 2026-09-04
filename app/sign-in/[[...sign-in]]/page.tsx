@@ -1,18 +1,19 @@
 import { SignIn } from '@clerk/nextjs';
+import Link from 'next/link';
 
 export default function SignInPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Nav */}
       <div className="bg-white border-b border-gray-100 px-6 h-14 flex items-center justify-between">
-        <a href="/" className="text-base font-semibold">
+        <Link href="/" className="text-base font-semibold">
           <span style={{ color: '#3B6D11' }}>Land</span>Ethic.io
-        </a>
+        </Link>
         <p className="text-sm text-gray-400">
           No account?{' '}
-          <a href="/sign-up" className="font-medium" style={{ color: '#3B6D11' }}>
+          <Link href="/sign-up" className="font-medium" style={{ color: '#3B6D11' }}>
             Sign up free
-          </a>
+          </Link>
         </p>
       </div>
 

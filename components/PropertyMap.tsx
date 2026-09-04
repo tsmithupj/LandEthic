@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import type { Map as MapboxMap } from 'mapbox-gl';
 
 interface PropertyMapProps {
   boundary?: number[][][];
@@ -11,7 +12,7 @@ interface PropertyMapProps {
 
 export default function PropertyMap({ boundary, center, acreage, className = '' }: PropertyMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
+  const mapRef = useRef<MapboxMap | null>(null);
 
   useEffect(() => {
     if (!mapContainer.current) return;
@@ -22,7 +23,7 @@ export default function PropertyMap({ boundary, center, acreage, className = '' 
       return;
     }
 
-    let map: any;
+    let map: MapboxMap;
 
     // Dynamically import mapbox-gl to avoid SSR errors
     import('mapbox-gl').then((mapboxgl) => {

@@ -40,11 +40,19 @@ CLERK_SECRET_KEY=sk_test_...
 
 # Anthropic — from https://console.anthropic.com
 ANTHROPIC_API_KEY=sk-ant-...
+
+# Database — from https://neon.tech (free tier)
+DATABASE_URL=postgresql://...
 ```
 
-The app works with just Clerk + Anthropic keys. Mapbox and Regrid degrade gracefully to placeholders.
+Mapbox and Regrid degrade gracefully to placeholders if omitted.
 
 > **Note:** The Clerk routing variables in `.env.example` can be left as-is — they point to `/sign-in`, `/sign-up`, `/dashboard`, and `/onboarding` which are already set up in the app.
+
+After setting `DATABASE_URL`, create the tables once with:
+```bash
+npx drizzle-kit push
+```
 
 ### 4. Start the dev server
 ```bash
@@ -94,7 +102,10 @@ In your Vercel project → **Settings → Environment Variables**, add:
 | `ANTHROPIC_API_KEY` | `sk-ant-...` | [console.anthropic.com](https://console.anthropic.com) |
 | `NEXT_PUBLIC_MAPBOX_TOKEN` | `pk.eyJ1...` | [account.mapbox.com](https://account.mapbox.com) |
 | `REGRID_API_KEY` | *(from Regrid)* | [regrid.com/api](https://regrid.com/api) |
+| `DATABASE_URL` | `postgresql://...` | [neon.tech](https://neon.tech) — create a project, copy the pooled connection string |
 | `NEXT_PUBLIC_APP_URL` | `https://your-app.vercel.app` | Your Vercel deployment URL |
+
+Run `npx drizzle-kit push` once against your Neon `DATABASE_URL` to create the `properties`, `plans`, `tasks`, and `subscriptions` tables before the first deploy.
 
 > **Clerk production keys:** For `pk_test_` / `sk_test_` keys, Clerk will work on localhost and Vercel preview URLs. When you're ready to go live, switch to `pk_live_` / `sk_live_` keys from your Clerk dashboard (same app, just toggle the environment at top of the Clerk dashboard).
 
@@ -115,17 +126,28 @@ app/
   onboarding/page.tsx               # 4-step onboarding — protected
   dashboard/page.tsx                # Property dashboard + action plan — protected
   dashboard/task/[id]/page.tsx      # Task detail with impact score breakdown
+  dashboard/species/page.tsx        # Ground-photo species ID + nearby species browser
   upgrade/page.tsx                  # Subscription tier comparison
   api/
     parcel-lookup/route.ts          # Regrid parcel boundary lookup
     analyze-property/route.ts       # Claude AI property analysis
     generate-plan/route.ts          # Claude AI action plan generation
+    replace-task/route.ts           # Claude AI single-task swap
+    task-chat/route.ts              # Claude AI chat scoped to one task
+    identify-species/route.ts       # iNaturalist computer-vision species ID from a photo
+    nearby-species/route.ts         # iNaturalist species observed near a location
+    set-tier/route.ts               # Dev-only tier switch (no payment — see Known limitations)
 
 components/
   PropertyMap.tsx                   # Mapbox GL satellite map with parcel boundary overlay
+  DashboardMap.tsx                  # Dashboard property map view
+  DrawablePropertyMap.tsx           # Manual boundary drawing when Regrid has no match
+  ParcelConfirmMap.tsx              # Parcel confirmation step in onboarding
+  GeneratingOverlay.tsx             # Animated progress overlay during AI generation
 
 lib/
   claude.ts                         # All Claude API prompt logic (analyze + plan generation)
+  satellite.ts                      # Mapbox Static Images fetch for satellite imagery
   store.tsx                         # React context + localStorage (scoped per Clerk user ID)
 
 middleware.ts                       # Clerk route protection (/onboarding, /dashboard)
@@ -133,6 +155,8 @@ middleware.ts                       # Clerk route protection (/onboarding, /dash
 types/
   index.ts                          # Shared TypeScript types
 ```
+
+> **Known limitation:** `/api/set-tier` is a developer convenience for testing tier-gated features locally; it is not wired to Stripe and should not be reachable in production.
 
 ---
 
@@ -151,10 +175,11 @@ types/
 ## Next features to build
 
 - [x] User authentication (Clerk — Google + Email)
-- [ ] Database to persist properties + plans (Postgres via Neon or Supabase)
-- [ ] Real Regrid parcel lookup replacing mock boundary
-- [ ] Ground-level photo upload + Claude vision analysis (Steward tier)
-- [ ] Stripe subscription billing
+- [x] Real Regrid parcel lookup + manual boundary drawing fallback
+- [x] Ground-level photo ID + nearby species browser (iNaturalist)
+- [x] Database to persist properties + plans (Postgres via Neon)
+- [x] Auth check on all `/api/*` routes, not just `/onboarding` and `/dashboard` pages
+- [ ] Stripe subscription billing (currently `/api/set-tier` sets tier with no payment — dev-only)
 - [ ] Monthly plan regeneration (Naturalist tier)
 - [ ] Weekly checklist + seed/nesting recommendations (Pro tier)
 

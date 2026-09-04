@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import type { Map as MapboxMap } from 'mapbox-gl';
 import type { InsightZone } from '@/lib/store';
 
 interface DashboardMapProps {
@@ -104,14 +105,13 @@ export default function DashboardMap({
   county,
   state,
   activeZone,
-  activeZoneLabel,
   activeZoneType,
   height = 320,
   propertyId,
   autoFlyover = true,
 }: DashboardMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
-  const mapRef       = useRef<any>(null);
+  const mapRef       = useRef<MapboxMap | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
   // Keep zone props in refs so they're always current inside async callbacks
@@ -128,7 +128,7 @@ export default function DashboardMap({
   const [loaded,   setLoaded]   = useState(false);
 
   // ── Core highlight-drawing function ─────────────────────────────────────
-  function drawZoneHighlight(map: any) {
+  function drawZoneHighlight(map: MapboxMap | null) {
     if (!map) return;
 
     // Clear stale layers
@@ -152,8 +152,8 @@ export default function DashboardMap({
 
     let rawPolygon: number[][] | null = null;
     let color: string;
-    let fillOpacity = 0.28;
-    let lineWidth = 2.5;
+    const fillOpacity = 0.28;
+    const lineWidth = 2.5;
     let dashed = false;
     let geojsonCoords: number[][][];
 
@@ -237,7 +237,7 @@ export default function DashboardMap({
   }
 
   // ── Fly-around animation ────────────────────────────────────────────────
-  function startFlyAround(map: any, centerLng: number, centerLat: number) {
+  function startFlyAround(map: MapboxMap) {
     setAnimating(true);
     setIs3D(true);
 
@@ -282,7 +282,7 @@ export default function DashboardMap({
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) return;
 
-    let map: any;
+    let map: MapboxMap;
 
     (async () => {
       const mapboxgl = (await import('mapbox-gl')).default;
@@ -368,17 +368,13 @@ export default function DashboardMap({
         drawZoneHighlight(map);
 
         // Flyover logic
-        const [lng, lat] = bounds
-          ? [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2]
-          : center;
-
         const flyKey    = propertyId ? `landethic_flyover_${propertyId}` : null;
         const seen      = flyKey ? !!localStorage.getItem(flyKey) : false;
         const shouldFly = autoFlyover && !seen;
 
         if (shouldFly) {
           if (flyKey) localStorage.setItem(flyKey, '1');
-          setTimeout(() => startFlyAround(map, lng, lat), 1200);
+          setTimeout(() => startFlyAround(map), 1200);
         }
       });
     })();
@@ -394,7 +390,6 @@ export default function DashboardMap({
   useEffect(() => {
     if (!loaded) return;
     drawZoneHighlight(mapRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeZone, activeZoneType, loaded]);
 
   // ── Toggle 3D ────────────────────────────────────────────────────────────
@@ -407,8 +402,7 @@ export default function DashboardMap({
       setIs3D(false);
       map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
     } else {
-      const c = map.getCenter();
-      startFlyAround(map, c.lng, c.lat);
+      startFlyAround(map);
     }
   };
 

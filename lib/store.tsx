@@ -126,33 +126,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const insights      = activeEntry?.insights ?? [];
   const canAddProperty = propertyEntries.length < propertyLimit;
 
-  // Hydrate from localStorage
+  // Hydrate onboarding-draft fields from localStorage — transient form state only,
+  // not saved entities, so this stays client-side (see propertyEntries fetch below).
   useEffect(() => {
     if (!isLoaded) return;
     if (hydratedFor === userId) return;
 
     try {
-      const key = storageKey(userId);
-      const raw = localStorage.getItem(key);
+      const raw = localStorage.getItem(storageKey(userId));
       if (raw) {
         const saved = JSON.parse(raw);
-
-        // Support both old single-property format and new multi-property format
-        if (saved.propertyEntries) {
-          setPropertyEntries(saved.propertyEntries);
-          setActivePropertyId(saved.activePropertyId ?? saved.propertyEntries[0]?.property.id ?? null);
-        } else if (saved.property && saved.plan) {
-          // Migrate old format
-          const entry: PropertyEntry = {
-            property: saved.property,
-            plan:     saved.plan,
-            insights: saved.insights ?? [],
-            boundary: saved.boundary ?? null,
-          };
-          setPropertyEntries([entry]);
-          setActivePropertyId(saved.property.id);
-        }
-
         if (saved.address)       setAddress(saved.address);
         if (saved.acreage)       setAcreage(saved.acreage);
         if (saved.goals)         setGoals(saved.goals);
@@ -165,19 +148,45 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setHydratedFor(userId);
   }, [isLoaded, userId, hydratedFor]);
 
-  // Persist to localStorage
+  // Persist onboarding-draft fields to localStorage
   useEffect(() => {
     if (!isLoaded || hydratedFor !== userId) return;
-    if (!address && propertyEntries.length === 0) return;
+    if (!address) return;
     try {
       localStorage.setItem(
         storageKey(userId),
-        JSON.stringify({ propertyEntries, activePropertyId, address, acreage, goals, userGoalsText })
+        JSON.stringify({ address, acreage, goals, userGoalsText })
       );
     } catch {
       // ignore
     }
-  }, [isLoaded, userId, hydratedFor, propertyEntries, activePropertyId, address, acreage, goals, userGoalsText]);
+  }, [isLoaded, userId, hydratedFor, address, acreage, goals, userGoalsText]);
+
+  // Load saved properties from the server (source of truth — replaces localStorage)
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!userId) {
+      setPropertyEntries([]);
+      setActivePropertyId(null);
+      return;
+    }
+
+    let cancelled = false;
+    fetch('/api/properties')
+      .then((res) => (res.ok ? res.json() : { entries: [] }))
+      .then((data: { entries: PropertyEntry[] }) => {
+        if (cancelled) return;
+        setPropertyEntries(data.entries);
+        setActivePropertyId((prev) =>
+          prev && data.entries.some((e) => e.property.id === prev)
+            ? prev
+            : data.entries[0]?.property.id ?? null
+        );
+      })
+      .catch(() => { /* leave state empty on failure */ });
+
+    return () => { cancelled = true; };
+  }, [isLoaded, userId]);
 
   // Core action: analyze property then generate plan
   const analyzeAndPlan = useCallback(async (): Promise<boolean> => {
@@ -205,9 +214,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const analyzeData  = await analyzeRes.json();
       const profile: PropertyProfile = analyzeData.profile;
 
-      // Clear flyover flag for the new property
-      try { localStorage.removeItem(`landethic_flyover_${profile.id}`); } catch { /* ignore */ }
-
       const planRes = await fetch('/api/generate-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -223,19 +229,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const newPlan: ActionPlan = planData.plan;
       const newInsights: Insight[] = analyzeData.insights ?? [];
 
-      const newEntry: PropertyEntry = {
-        property: profile,
-        plan:     newPlan,
-        insights: newInsights,
-        boundary: boundary ?? null,
-      };
-
-      setPropertyEntries((prev) => {
-        // Remove any existing entry with the same ID (shouldn't happen, but safe)
-        const filtered = prev.filter((e) => e.property.id !== profile.id);
-        return [...filtered, newEntry];
+      const saveRes = await fetch('/api/properties', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile, insights: newInsights, boundary: boundary ?? null, plan: newPlan }),
       });
-      setActivePropertyId(profile.id);
+
+      if (!saveRes.ok) {
+        const err = await saveRes.json();
+        throw new Error(err.error ?? 'Saving property failed');
+      }
+
+      const saveData = await saveRes.json();
+      const newEntry: PropertyEntry = saveData.entry;
+
+      // Clear flyover flag for the new property (uses the server-issued id)
+      try { localStorage.removeItem(`landethic_flyover_${newEntry.property.id}`); } catch { /* ignore */ }
+
+      setPropertyEntries((prev) => [...prev, newEntry]);
+      setActivePropertyId(newEntry.property.id);
 
       return true;
     } catch (err) {
@@ -245,13 +257,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [address, acreage, goals, boundary]);
+  }, [address, acreage, goals, userGoalsText, boundary, tier]);
 
   // Mark a task complete
 
   // Regenerate plan only — re-uses the existing property profile (no re-analysis)
   const regeneratePlan = useCallback(async (): Promise<boolean> => {
-    if (!property) return false;
+    if (!property || !activePropertyId) return false;
     setIsAnalyzing(true);
     setAnalyzeError(null);
     try {
@@ -265,7 +277,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         throw new Error(err.error ?? 'Plan generation failed');
       }
       const planData = await planRes.json();
-      const newPlan: ActionPlan = planData.plan;
+      const generatedPlan: ActionPlan = planData.plan;
+
+      const saveRes = await fetch(`/api/properties/${activePropertyId}/plan`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: generatedPlan }),
+      });
+      if (!saveRes.ok) {
+        const err = await saveRes.json();
+        throw new Error(err.error ?? 'Saving plan failed');
+      }
+      const saveData = await saveRes.json();
+      const newPlan: ActionPlan = saveData.plan;
 
       setPropertyEntries((prev) =>
         prev.map((entry) => {
@@ -283,6 +307,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [property, tier, userGoalsText, activePropertyId]);
 
   const completeTask = useCallback((taskId: string) => {
+    const current = plan?.tasks.find((t) => t.id === taskId);
+    if (!current) return;
+    const nextCompleted = !current.completed;
+
+    // Optimistic local toggle — the checkbox flips instantly, independent of the network.
     setPropertyEntries((prev) =>
       prev.map((entry) => {
         if (entry.property.id !== activePropertyId) return entry;
@@ -292,14 +321,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...entry.plan,
             tasks: entry.plan.tasks.map((t) =>
               t.id === taskId
-                ? { ...t, completed: !t.completed, completedAt: !t.completed ? new Date().toISOString() : undefined }
+                ? { ...t, completed: nextCompleted, completedAt: nextCompleted ? new Date().toISOString() : undefined }
                 : t
             ),
           },
         };
       })
     );
-  }, [activePropertyId]);
+
+    fetch(`/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed: nextCompleted }),
+    })
+      .then((res) => { if (!res.ok) throw new Error('Failed to save'); })
+      .catch(() => {
+        // Revert the optimistic toggle if the save failed
+        setPropertyEntries((prev) =>
+          prev.map((entry) => {
+            if (entry.property.id !== activePropertyId) return entry;
+            return {
+              ...entry,
+              plan: {
+                ...entry.plan,
+                tasks: entry.plan.tasks.map((t) =>
+                  t.id === taskId ? { ...t, completed: current.completed, completedAt: current.completedAt } : t
+                ),
+              },
+            };
+          })
+        );
+        setAnalyzeError('Could not save task progress. Try again.');
+      });
+  }, [activePropertyId, plan]);
 
   const replaceTask = useCallback((taskId: string, newTask: ActionTask) => {
     setPropertyEntries((prev) =>
@@ -323,6 +377,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // Remove a property from the account
   const removeProperty = useCallback((id: string) => {
+    fetch(`/api/properties/${id}`, { method: 'DELETE' }).catch(() => { /* best-effort */ });
     setPropertyEntries((prev) => {
       const next = prev.filter((e) => e.property.id !== id);
       return next;
