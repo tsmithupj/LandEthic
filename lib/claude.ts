@@ -12,7 +12,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Strip markdown code fences if Claude wraps its response in ```json ... ```
 function stripCodeFences(text: string): string {
-  return text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  return text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 }
 
 
@@ -218,7 +218,7 @@ LOCATION DESCRIPTION RULES:
 - Reference land features the owner knows: "the tree line", "the open field", "the fence row", "the low wet area", "the slope", "the pond edge".
 - Include approximate distances or proportions: "the northern quarter of your property", "within 50 feet of the forest edge", "along the full length of the eastern fence row".
 - Never be vague ("somewhere on the property" or "in a suitable area") — always be specific.
-- If t- If the task applies to the full property, say "across your whole property" or name the specific feature it applies to everywhere.`;
+- If the task applies to the full property, say "across your whole property" or name the specific feature it applies to everywhere.`;
 
   const message = await client.messages.create({
     model: 'claude-opus-4-6',

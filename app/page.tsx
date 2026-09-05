@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+import { SignedIn, SignedOut, SignInButton } from "@clerk/nextjs";
+import AppUserButton from "@/components/AppUserButton";
 
 const steps = [
   {
@@ -102,7 +103,7 @@ export default function LandingPage() {
               <Link href="/dashboard" className="text-sm font-medium text-white px-4 py-2 rounded-lg transition-colors" style={{ backgroundColor: "#3B6D11" }}>
                 My dashboard →
               </Link>
-              <UserButton afterSignOutUrl="/" />
+              <AppUserButton />
             </SignedIn>
           </div>
         </div>

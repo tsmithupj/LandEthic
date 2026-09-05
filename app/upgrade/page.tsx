@@ -97,12 +97,14 @@ function UpgradePageContent() {
     refreshBillingStatus();
   }, [refreshBillingStatus]);
 
-  // After returning from Stripe Checkout or the Billing Portal, Clerk's cached
-  // publicMetadata is stale until reloaded — the webhook already updated it server-side.
+  // After returning from the Billing Portal, Clerk's cached publicMetadata may be
+  // stale — the webhook already updated it server-side (e.g. a payment method change
+  // triggering a status update). A completed Checkout redirects straight to the
+  // dashboard instead, so there's no "checkout=success" case to handle here.
   useEffect(() => {
-    const checkout = searchParams.get("checkout");
     const portal = searchParams.get("portal");
-    if (checkout === "success" || portal === "return") {
+    const checkout = searchParams.get("checkout");
+    if (portal === "return") {
       user?.reload().then(() => refreshBillingStatus());
       router.replace("/upgrade");
     } else if (checkout === "cancelled") {
@@ -145,7 +147,8 @@ function UpgradePageContent() {
         });
         if (!res.ok) throw new Error("Failed to switch plan");
         await user?.reload();
-        await refreshBillingStatus();
+        router.push("/dashboard");
+        return;
       }
     } catch {
       setError("Something went wrong. Please try again.");

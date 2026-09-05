@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { UserButton } from '@clerk/nextjs';
-import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useUser } from '@clerk/nextjs';
 import { useStore } from '@/lib/store';
 import type { ActionTask } from '@/types';
 import type { InsightZone } from '@/lib/store';
 import GeneratingOverlay from '@/components/GeneratingOverlay';
+import AppUserButton from '@/components/AppUserButton';
 
 const DashboardMap = dynamic(() => import('@/components/DashboardMap'), { ssr: false });
 
@@ -351,8 +352,10 @@ function NoProperty() {
 
 // ─── Dashboard page ────────────────────────────────────────────────────────
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { user } = useUser();
   const {
     property, plan, insights, boundary, address,
     propertyEntries, activePropertyId, switchProperty,
@@ -363,6 +366,15 @@ export default function DashboardPage() {
   const [editingGoals, setEditingGoals] = useState(false);
   const [goalsInput, setGoalsInput] = useState('');
   const [regenError, setRegenError] = useState<string | null>(null);
+
+  // Landing here straight from a completed Stripe Checkout — Clerk's cached
+  // publicMetadata is stale until reloaded (the webhook already updated it server-side).
+  useEffect(() => {
+    if (searchParams.get('checkout') === 'success') {
+      user?.reload();
+      router.replace('/dashboard');
+    }
+  }, [searchParams, user, router]);
 
   const activeInsight = activeInsightIndex !== null ? insights[activeInsightIndex] : null;
   const activeZone = (activeInsight?.zone ?? null) as InsightZone | null;
@@ -403,15 +415,13 @@ export default function DashboardPage() {
           </Link>
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-400 hidden sm:block">{tierLabel} plan</span>
-            {tier === 'free' || tier === 'steward' ? (
-              <Link
-                href="/upgrade"
-                className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg"
-                style={{ backgroundColor: '#3B6D11' }}
-              >
-                Upgrade
-              </Link>
-            ) : null}
+            <Link
+              href="/upgrade"
+              className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg"
+              style={{ backgroundColor: '#3B6D11' }}
+            >
+              {tier === 'free' || tier === 'steward' ? 'Upgrade' : 'Manage plan'}
+            </Link>
             {property && (
               <button
                 onClick={async () => { await regeneratePlan(); }}
@@ -440,7 +450,7 @@ export default function DashboardPage() {
                 + New property
               </button>
             ) : null}
-            <UserButton afterSignOutUrl="/" />
+            <AppUserButton />
           </div>
         </div>
       </nav>
@@ -679,5 +689,13 @@ export default function DashboardPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <DashboardPageContent />
+    </Suspense>
   );
 }

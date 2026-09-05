@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
       trial_period_days: 14,
       metadata: { clerkUserId: userId },
     },
-    success_url: `${appUrl}/upgrade?checkout=success`,
+    success_url: `${appUrl}/dashboard?checkout=success`,
     cancel_url: `${appUrl}/upgrade?checkout=cancelled`,
     metadata: { clerkUserId: userId, tier: body.tier },
   });
