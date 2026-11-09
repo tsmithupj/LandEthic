@@ -2,10 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import type { ActionTask, PropertyProfile } from '@/types';
 import { GOAL_LABELS } from '@/types';
+import { auth } from '@clerk/nextjs/server';
+import { getUserTier } from '@/lib/tier-server';
+import { enforceAiLimit } from '@/lib/rate-limit';
+
+export const maxDuration = 60;
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Keep each chat request bounded: only the most recent turns, each trimmed.
+const MAX_TURNS = 20;
+const MAX_CHARS_PER_TURN = 2000;
+
 export async function POST(req: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
   const body = await req.json() as {
     task: ActionTask;
     property: PropertyProfile;
@@ -13,11 +25,20 @@ export async function POST(req: NextRequest) {
     messages: { role: 'user' | 'assistant'; content: string }[];
   };
 
-  const { task, property, userGoalsText, messages } = body;
+  const { task, property, userGoalsText } = body;
+  const messages = (Array.isArray(body.messages) ? body.messages : [])
+    .filter((m) => (m?.role === 'user' || m?.role === 'assistant') && typeof m.content === 'string')
+    .slice(-MAX_TURNS)
+    .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_CHARS_PER_TURN) }));
+  // The API expects the conversation to start with a user turn.
+  while (messages.length && messages[0].role !== 'user') messages.shift();
 
-  if (!task || !property || !messages?.length) {
+  if (!task || !property?.goals || !messages.length) {
     return NextResponse.json({ error: 'task, property, and messages are required' }, { status: 400 });
   }
+
+  const limited = await enforceAiLimit(userId, 'task-chat', await getUserTier());
+  if (limited) return limited;
 
   const goalList = property.goals.map((g) => GOAL_LABELS[g]).join(', ');
   const month = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
@@ -56,7 +77,7 @@ RULES:
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      messages,
     });
 
     const reply = response.content[0].type === 'text' ? response.content[0].text : '';
@@ -64,6 +85,6 @@ RULES:
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[task-chat] error:', msg);
-    return NextResponse.json({ error: `Chat failed: ${msg}` }, { status: 500 });
+    return NextResponse.json({ error: 'Sorry, we could not answer just now. Please try again in a minute.' }, { status: 500 });
   }
 }

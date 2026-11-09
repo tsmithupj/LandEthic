@@ -72,6 +72,10 @@ export interface ActionTask {
   completedAt?: string;
   // Where on the property this task takes place
   locationDescription?: string; // natural-language directions using cardinal directions and land features
+  area?: number[][];            // outline of the work area on the map: closed ring of [lng, lat]
+  // Conservationist weekly checklist
+  week?: number;                // 1–4: which week of its month to do this task
+  steps?: TaskStep[];           // small check-off steps
   // Species/materials recommendations
   recommendations?: {
     species?: string[];
@@ -83,6 +87,11 @@ export interface ActionTask {
   };
 }
 
+export interface TaskStep {
+  text: string;
+  done: boolean;
+}
+
 export interface ActionPlan {
   id: string;
   propertyId: string;
@@ -90,6 +99,58 @@ export interface ActionPlan {
   generatedAt: string;
   tasks: ActionTask[];
   summary: string;
+  /** "YYYY-MM" of the last monthly update (Naturalist+). */
+  lastMonthlyUpdate?: string;
+  /** Short note written with the last monthly update. */
+  monthlyNote?: string;
+}
+
+// ─── Habitat planners (Conservationist) ───────────────────────────────────
+
+export interface SeedPick {
+  seed: string;          // e.g. "Durana white clover"
+  lbsPerAcre: number;
+  notes?: string;
+}
+
+export interface FoodPlot {
+  id: string;
+  name: string;
+  acres: number;
+  where: string;
+  area?: number[][];     // closed ring of [lng, lat]
+  targetWildlife: string[];
+  seedMix: SeedPick[];
+  plantingWindow: string;
+  soilPrep: string[];
+  limeAndFertilizer?: string;
+  maintenance: string[];
+  why: string;
+}
+
+export interface NestingBox {
+  id: string;
+  species: string;       // e.g. "Eastern bluebird"
+  boxType: string;       // e.g. "Peterson-style box, 1.5-inch round hole"
+  count: number;
+  mountHeight: string;   // e.g. "5 feet"
+  facing: string;        // e.g. "East, away from prevailing wind"
+  spacing?: string;
+  where: string;
+  area?: number[][];     // small ring around where the boxes go
+  putUpBy?: string;
+  cleanOut?: string;
+  tips: string[];
+  why: string;
+}
+
+export interface HabitatPlan {
+  propertyId: string;
+  foodPlots: FoodPlot[];
+  foodPlotNote?: string;
+  nestingBoxes: NestingBox[];
+  nestingBoxNote?: string;
+  generatedAt: string;
 }
 
 // ─── API request/response shapes ──────────────────────────────────────────
@@ -108,6 +169,10 @@ export interface AnalyzePropertyResponse {
     type: 'positive' | 'warning' | 'opportunity';
     title: string;
     description: string;
+    zoneLabel?: string;
+    where?: string;
+    steps?: string[];
+    area?: number[][];
   }>;
 }
 

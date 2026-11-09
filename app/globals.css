@@ -3,12 +3,70 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #FBF6EC;
+  --foreground: #2A2116;
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  font-family: var(--font-public-sans), -apple-system, 'Segoe UI', sans-serif;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-arvo), Georgia, 'Times New Roman', serif;
+}
+
+@layer components {
+  .eyebrow {
+    @apply text-xs font-bold uppercase tracking-[0.14em] text-rust-700;
+  }
+  .card {
+    @apply bg-cream border border-paper-line rounded-2xl;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-[10px] bg-forest-700 px-7 py-3.5 text-[15px] font-semibold text-cream transition-colors hover:bg-forest-800 disabled:opacity-50;
+  }
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-[10px] border-[1.5px] border-paper-line px-7 py-3.5 text-[15px] font-semibold text-ink transition-colors hover:bg-cream-2;
+  }
+  .tag {
+    @apply rounded-full border border-paper-line bg-cream-2 px-3 py-1 text-xs font-medium text-ink-soft;
+  }
+}
+
+/* Long-form text on /privacy and /terms */
+.legal-prose {
+  @apply space-y-4 text-[15px] leading-[1.7] text-ink-soft;
+}
+.legal-prose h3 {
+  @apply pt-2 font-sans text-base font-bold text-ink;
+}
+.legal-prose strong {
+  @apply font-semibold text-ink;
+}
+.legal-prose a {
+  @apply font-medium text-forest-700 underline underline-offset-2 hover:text-forest-800;
+}
+.legal-prose ul {
+  @apply list-disc space-y-2 pl-5 marker:text-forest-600;
+}
+.legal-prose table {
+  @apply w-full border-collapse text-sm;
+}
+.legal-prose th {
+  @apply border-b border-paper-line py-2 pr-4 text-left font-semibold text-ink;
+}
+.legal-prose td {
+  @apply border-b border-paper-line py-2.5 pr-4 align-top;
+}
+
+/* Waiting-screen tip cards slide up as they appear */
+@keyframes le-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.le-rise { animation: le-rise 0.5s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .le-rise { animation: none; }
 }

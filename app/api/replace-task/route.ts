@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import type { ActionTask, PropertyProfile, SubscriptionTier } from '@/types';
 import { GOAL_LABELS } from '@/types';
+import { auth } from '@clerk/nextjs/server';
+import { getUserTier } from '@/lib/tier-server';
+import { enforceAiLimit } from '@/lib/rate-limit';
+import { cleanSteps, cleanWeek } from '@/lib/db/mappers';
+import { fetchSatelliteSnapshot, ringFromPixels, photoIntro, photoBlock, AREA_PIXEL_RULES } from '@/lib/satellite';
+
+export const maxDuration = 60;
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -17,18 +24,35 @@ PLAIN LANGUAGE RULES:
 Always respond with valid JSON only. No markdown, no prose outside the JSON.`;
 
 export async function POST(req: NextRequest) {
+  // Swapping tasks is a paid feature — check the real tier server-side.
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const tier: SubscriptionTier = await getUserTier();
+  if (tier === 'free') {
+    return NextResponse.json({ error: 'Task swapping is available on paid plans' }, { status: 403 });
+  }
+
   const body = await req.json() as {
     completedTask: ActionTask;
     property: PropertyProfile;
     existingTasks: ActionTask[];
-    tier: SubscriptionTier;
+    boundary?: number[][][];
   };
 
-  const { completedTask, property, existingTasks, tier } = body;
+  const { completedTask, property, existingTasks } = body;
+  if (!completedTask || !property?.goals || !Array.isArray(existingTasks)) {
+    return NextResponse.json({ error: 'completedTask, property, and existingTasks are required' }, { status: 400 });
+  }
+
+  const limited = await enforceAiLimit(userId, 'replace-task', tier);
+  if (limited) return limited;
   const goalList = property.goals.map((g) => GOAL_LABELS[g]).join(', ');
   const existingTitles = existingTasks.map((t) => `- ${t.title}`).join('\n');
   const month = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
   const season = getCurrentSeason();
+
+  // Satellite photo so the new task points to a real spot on the land
+  const satellite = (body.boundary?.[0]?.length ?? 0) >= 3 ? await fetchSatelliteSnapshot(body.boundary) : null;
 
   const prompt = `The landowner has already completed this task on their property:
 "${completedTask.title}"
@@ -46,7 +70,9 @@ PROPERTY:
 - Goals: ${goalList}
 - Land health score: ${property.ecosystemScore ?? 50}/100
 
-EXISTING TASKS (do not suggest these):
+${satellite ? `${photoIntro(satellite.hasOutline)}
+
+` : ''}EXISTING TASKS (do not suggest these):
 ${existingTitles}
 
 Return ONLY this JSON (no markdown):
@@ -65,36 +91,53 @@ Return ONLY this JSON (no markdown):
   "tags": ["tag1", "tag2"],
   "month": "${month}",
   "season": "${season}",
-  "tier": "${tier}",
+  "tier": "${tier}",${tier === 'conservationist' ? `
+  "week": ${Math.min(4, Math.ceil(new Date().getDate() / 7))},
+  "steps": ["3–6 short check-off steps, in order, each a single action with amounts or sizes where it helps"],` : ''}
   "completed": false,
   "propertyId": "${property.id}",
-  "locationDescription": "2-4 sentences describing exactly where on the property this task takes place. Use cardinal directions and reference features the owner can see.",
+  "locationDescription": "2-4 sentences describing exactly where on the property this task takes place. Start from something the owner can see (house, barn, driveway, road, pond, tree line) and give a compass direction and rough distance from it.",
   "recommendations": {
     "species": [],
     "materials": [],
     "dimensions": "",
     "placement": ""
-  }
-}`;
+  }${satellite ? `,
+  "areaPixels": [[x, y], [x, y], [x, y], [x, y]]` : ''}
+}${satellite ? `
+
+${AREA_PIXEL_RULES}` : ''}`;
 
   try {
     const message = await client.messages.create({
       model: 'claude-opus-4-6',
-      max_tokens: 1024,
+      max_tokens: 2048,
       system: SYSTEM,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{
+        role: 'user',
+        content: satellite ? [photoBlock(satellite.base64), { type: 'text', text: prompt }] : prompt,
+      }],
     });
 
     const text = message.content[0].type === 'text' ? message.content[0].text : '';
     const raw = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-    const newTask = JSON.parse(raw) as ActionTask;
-    // Ensure the id is unique
+    const { areaPixels, ...parsed } = JSON.parse(raw) as ActionTask & { areaPixels?: unknown };
+    const newTask: ActionTask = parsed;
+    const area = ringFromPixels(satellite, areaPixels);
+    if (area) newTask.area = area;
+    // Ensure the id is unique, and checklist steps are in the saved shape
     newTask.id = `task-replace-${Date.now()}`;
+    newTask.tier = tier;
+    newTask.completed = false;
+    const steps = cleanSteps(newTask.steps);
+    if (steps) newTask.steps = steps; else delete newTask.steps;
+    const week = cleanWeek(newTask.week);
+    if (week) newTask.week = week; else delete newTask.week;
 
     return NextResponse.json({ task: newTask });
   } catch (err) {
     console.error('[replace-task] error:', err);
-    return NextResponse.json({ error: 'Failed to generate replacement task' }, { status: 500 });
+    return NextResponse.json({ error: 'We could not suggest a new task just now. Please try again in a minute.' }, { status: 500 });
   }
 }
 

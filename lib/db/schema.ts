@@ -1,5 +1,5 @@
-import { pgTable, uuid, text, numeric, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
-import type { Goal, SubscriptionTier } from '@/types';
+import { pgTable, uuid, text, numeric, boolean, jsonb, timestamp, index, integer } from 'drizzle-orm/pg-core';
+import type { Goal, SubscriptionTier, TaskStep, FoodPlot, NestingBox } from '@/types';
 import type { Insight } from '@/lib/store';
 
 export const properties = pgTable('properties', {
@@ -33,6 +33,9 @@ export const plans = pgTable('plans', {
   tier: text('tier').$type<SubscriptionTier>().notNull(),
   summary: text('summary').notNull(),
   generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
+  // Monthly update (Naturalist+): "YYYY-MM" of the last update, and the note written with it
+  lastMonthlyUpdate: text('last_monthly_update'),
+  monthlyNote: text('monthly_note'),
 }, (t) => [
   index('plans_property_id_idx').on(t.propertyId),
 ]);
@@ -50,6 +53,11 @@ export const tasks = pgTable('tasks', {
   description: text('description').notNull(),
   whyItMatters: text('why_it_matters').notNull(),
   locationDescription: text('location_description'),
+  // Outline of the work area on the map: closed ring of [lng, lat]
+  area: jsonb('area').$type<number[][]>(),
+  // Weekly checklist (Conservationist): week of the month (1–4) and small check-off steps
+  week: integer('week'),
+  steps: jsonb('steps').$type<TaskStep[]>(),
   impactScore: numeric('impact_score', { mode: 'number' }).notNull(),
   impactBreakdown: jsonb('impact_breakdown').$type<{
     goalAlignment: number;
@@ -86,4 +94,47 @@ export const subscriptions = pgTable('subscriptions', {
   cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
   currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// One row per AI request, used for the per-user daily cap in lib/rate-limit.ts.
+// Old rows can be deleted at any time — only the last 24 hours are ever read.
+export const aiUsage = pgTable('ai_usage', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clerkUserId: text('clerk_user_id').notNull(),
+  route: text('route').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('ai_usage_user_route_created_idx').on(t.clerkUserId, t.route, t.createdAt),
+]);
+
+// Past Species ID results, shown as "Your recent identifications" in the field guide.
+// The photo is stored as a small JPEG thumbnail (data URL, ~20 KB) — not the full upload.
+export const speciesIds = pgTable('species_ids', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clerkUserId: text('clerk_user_id').notNull(),
+  propertyId: uuid('property_id').references(() => properties.id, { onDelete: 'set null' }),
+  thumbnail: text('thumbnail'),
+  commonName: text('common_name').notNull(),
+  scientificName: text('scientific_name'),
+  iconicTaxon: text('iconic_taxon'),
+  score: numeric('score', { mode: 'number' }),
+  // Full list of top matches returned at the time, so the details can be shown again
+  results: jsonb('results').$type<Record<string, unknown>[]>().notNull().default([]),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('species_ids_user_created_idx').on(t.clerkUserId, t.createdAt),
+]);
+
+// Food plot and nesting box plans (Conservationist). One row per property.
+export const habitatPlans = pgTable('habitat_plans', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  propertyId: uuid('property_id')
+    .notNull()
+    .unique()
+    .references(() => properties.id, { onDelete: 'cascade' }),
+  foodPlots: jsonb('food_plots').$type<FoodPlot[]>().notNull().default([]),
+  foodPlotNote: text('food_plot_note'),
+  nestingBoxes: jsonb('nesting_boxes').$type<NestingBox[]>().notNull().default([]),
+  nestingBoxNote: text('nesting_box_note'),
+  generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
 });

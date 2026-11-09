@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { Map as MapboxMap } from 'mapbox-gl';
+import { Icon } from '@/components/brand';
 
 interface PropertyMapProps {
   boundary?: number[][][];
@@ -81,10 +82,10 @@ export default function PropertyMap({ boundary, center, acreage, className = '' 
     <div className={`relative overflow-hidden rounded-2xl ${className}`} style={{ height: 220 }}>
       {!hasToken ? (
         // Placeholder when no Mapbox token is configured
-        <div className="w-full h-full flex items-center justify-center" style={{ background: '#C8DBA8' }}>
+        <div className="flex h-full w-full items-center justify-center bg-forest-50">
           <div className="text-center">
-            <p className="text-sm font-medium" style={{ color: '#3B6D11' }}>Map preview</p>
-            <p className="text-xs mt-1" style={{ color: '#639922' }}>Add NEXT_PUBLIC_MAPBOX_TOKEN to .env.local</p>
+            <p className="text-sm font-medium text-forest-700">Map preview</p>
+            <p className="mt-1 text-xs text-forest-600">The map is not available right now.</p>
           </div>
         </div>
       ) : (
@@ -92,15 +93,12 @@ export default function PropertyMap({ boundary, center, acreage, className = '' 
       )}
 
       {/* Acreage badge — bottom left */}
-      <div
-        className="absolute bottom-3 left-3 bg-white/90 text-xs font-medium px-2.5 py-1 rounded-lg z-10"
-        style={{ color: '#3B6D11' }}
-      >
-        📍 {acreage.toFixed(1)} acres
+      <div className="absolute bottom-3 left-3 z-10 flex items-center gap-1 rounded-lg bg-cream/90 px-2.5 py-1 text-xs font-medium text-forest-700">
+        <Icon.Pin size={12} /> {acreage.toFixed(1)} acres
       </div>
 
       {/* Attribution badge — bottom right */}
-      <div className="absolute bottom-3 right-3 text-xs text-gray-400 bg-white/70 px-2 py-0.5 rounded z-10">
+      <div className="absolute bottom-3 right-3 text-xs text-ink-faint bg-cream/70 px-2 py-0.5 rounded z-10">
         Satellite · Regrid parcels
       </div>
     </div>

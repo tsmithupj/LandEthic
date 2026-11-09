@@ -9,15 +9,13 @@ import {
   type ReactNode,
 } from 'react';
 import { useUser } from '@clerk/nextjs';
-import type { PropertyProfile, ActionPlan, ActionTask, Goal, SubscriptionTier } from '@/types';
+import type { PropertyProfile, ActionPlan, ActionTask, Goal, SubscriptionTier, TaskStep } from '@/types';
+import { monthKey, monthNumOf } from '@/lib/months';
 
-// Property limits per tier
-export const TIER_PROPERTY_LIMITS: Record<SubscriptionTier, number> = {
-  free:             1,
-  steward:          1,
-  naturalist:       3,
-  conservationist:  Infinity,
-};
+import { TIER_PROPERTY_LIMITS } from '@/lib/tiers';
+
+// Re-exported so existing imports keep working; the source of truth is lib/tiers.ts
+export { TIER_PROPERTY_LIMITS };
 
 // A single saved property with its plan and context
 export interface PropertyEntry {
@@ -27,14 +25,24 @@ export interface PropertyEntry {
   boundary: number[][][] | null;
 }
 
+export type AnalyzeStage = 'idle' | 'analyzing' | 'planning' | 'saving';
+
 export type InsightZone = 'full' | 'north' | 'south' | 'east' | 'west' | 'center' | 'perimeter';
 
 export interface Insight {
   type:       'positive' | 'warning' | 'opportunity';
   title:      string;
   description: string;
+  /** Legacy: old insights had a map zone for highlighting. No longer used. */
   zone?:      InsightZone;
+  /** Short name for the spot, e.g. "south tree line". */
   zoneLabel?: string;
+  /** Plain-language directions to the spot on the ground. */
+  where?:     string;
+  /** Ordered, concrete steps for the owner. */
+  steps?:     string[];
+  /** Outline of the spot on the map: closed ring of [lng, lat]. */
+  area?:      number[][];
 }
 
 // Shape of the global store
@@ -61,6 +69,8 @@ interface LandEthicStore {
 
   // Loading / error
   isAnalyzing:  boolean;
+  /** Which part of the work is running, for the progress screen. */
+  analyzeStage: AnalyzeStage;
   analyzeError: string | null;
 
   // Setters for onboarding inputs
@@ -74,7 +84,12 @@ interface LandEthicStore {
   // Actions
   analyzeAndPlan:  () => Promise<boolean>;
   regeneratePlan:  () => Promise<boolean>;
+  refreshInsights: () => Promise<boolean>;
+  /** Naturalist+: carry over unfinished tasks and add this month's new ones. */
+  monthlyUpdate:   () => Promise<boolean>;
   completeTask:    (taskId: string) => void;
+  /** Conservationist weekly checklist: tick one step of a task. */
+  toggleTaskStep:  (taskId: string, stepIndex: number) => void;
   replaceTask:     (taskId: string, newTask: ActionTask) => void;
   switchProperty:  (id: string) => void;
   removeProperty:  (id: string) => void;
@@ -115,6 +130,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // Loading / error
   const [isAnalyzing,  setIsAnalyzing]  = useState(false);
+  const [analyzeStage, setAnalyzeStage] = useState<AnalyzeStage>('idle');
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
@@ -191,6 +207,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Core action: analyze property then generate plan
   const analyzeAndPlan = useCallback(async (): Promise<boolean> => {
     setIsAnalyzing(true);
+    setAnalyzeStage('analyzing');
     setAnalyzeError(null);
 
     try {
@@ -214,6 +231,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const analyzeData  = await analyzeRes.json();
       const profile: PropertyProfile = analyzeData.profile;
 
+      setAnalyzeStage('planning');
       const planRes = await fetch('/api/generate-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -229,6 +247,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const newPlan: ActionPlan = planData.plan;
       const newInsights: Insight[] = analyzeData.insights ?? [];
 
+      setAnalyzeStage('saving');
       const saveRes = await fetch('/api/properties', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -256,21 +275,74 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return false;
     } finally {
       setIsAnalyzing(false);
+      setAnalyzeStage('idle');
     }
   }, [address, acreage, goals, userGoalsText, boundary, tier]);
 
   // Mark a task complete
 
+  // Re-run the property analysis and replace only the insights (profile, score and plan stay)
+  const refreshInsights = useCallback(async (): Promise<boolean> => {
+    if (!property || !activePropertyId) return false;
+    setAnalyzeError(null);
+    try {
+      const res = await fetch('/api/analyze-property', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address: property.address,
+          acreage: property.acreage,
+          goals: property.goals,
+          userGoalsText: userGoalsText || undefined,
+          boundary: activeEntry?.boundary ?? undefined,
+          refreshPropertyId: activePropertyId,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? 'Updating insights failed');
+      }
+      const data = await res.json();
+      const newInsights: Insight[] = data.insights ?? [];
+
+      const saveRes = await fetch(`/api/properties/${activePropertyId}/insights`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ insights: newInsights }),
+      });
+      if (!saveRes.ok) {
+        const err = await saveRes.json();
+        throw new Error(err.error ?? 'Saving insights failed');
+      }
+
+      setPropertyEntries((prev) =>
+        prev.map((entry) =>
+          entry.property.id === activePropertyId ? { ...entry, insights: newInsights } : entry
+        )
+      );
+      return true;
+    } catch (err) {
+      setAnalyzeError(err instanceof Error ? err.message : 'Updating insights failed');
+      return false;
+    }
+  }, [property, activePropertyId, activeEntry, userGoalsText]);
+
   // Regenerate plan only — re-uses the existing property profile (no re-analysis)
   const regeneratePlan = useCallback(async (): Promise<boolean> => {
     if (!property || !activePropertyId) return false;
     setIsAnalyzing(true);
+    setAnalyzeStage('planning');
     setAnalyzeError(null);
     try {
       const planRes = await fetch('/api/generate-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile: property, tier, userGoalsText: userGoalsText || undefined }),
+        body: JSON.stringify({
+          profile: property,
+          tier,
+          userGoalsText: userGoalsText || undefined,
+          boundary: activeEntry?.boundary ?? undefined,
+        }),
       });
       if (!planRes.ok) {
         const err = await planRes.json();
@@ -279,6 +351,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const planData = await planRes.json();
       const generatedPlan: ActionPlan = planData.plan;
 
+      setAnalyzeStage('saving');
       const saveRes = await fetch(`/api/properties/${activePropertyId}/plan`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -303,8 +376,79 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return false;
     } finally {
       setIsAnalyzing(false);
+      setAnalyzeStage('idle');
     }
-  }, [property, tier, userGoalsText, activePropertyId]);
+  }, [property, tier, userGoalsText, activePropertyId, activeEntry]);
+
+  // Monthly update — keeps finished tasks, moves unfinished ones up, adds the new month
+  const monthlyUpdate = useCallback(async (): Promise<boolean> => {
+    if (!activePropertyId) return false;
+    setIsAnalyzing(true);
+    setAnalyzeStage('planning');
+    setAnalyzeError(null);
+    try {
+      const res = await fetch(`/api/properties/${activePropertyId}/monthly-update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          month: monthKey(monthNumOf(new Date())),
+          userGoalsText: userGoalsText || undefined,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { plan?: ActionPlan; error?: string };
+      if (!res.ok || !data.plan) throw new Error(data.error ?? 'Monthly update failed');
+      const newPlan = data.plan;
+      setAnalyzeStage('saving');
+      setPropertyEntries((prev) =>
+        prev.map((entry) => (entry.property.id === activePropertyId ? { ...entry, plan: newPlan } : entry))
+      );
+      return true;
+    } catch (err) {
+      setAnalyzeError(err instanceof Error ? err.message : 'Monthly update failed');
+      return false;
+    } finally {
+      setIsAnalyzing(false);
+      setAnalyzeStage('idle');
+    }
+  }, [activePropertyId, userGoalsText]);
+
+  // Tick one checklist step. Finishing every step finishes the task; un-ticking
+  // a step of a finished task re-opens it.
+  const toggleTaskStep = useCallback((taskId: string, stepIndex: number) => {
+    const current = plan?.tasks.find((t) => t.id === taskId);
+    if (!current?.steps?.[stepIndex]) return;
+    const steps: TaskStep[] = current.steps.map((s, i) => (i === stepIndex ? { ...s, done: !s.done } : s));
+    const allDone = steps.every((s) => s.done);
+    const completed = allDone ? true : current.completed && steps[stepIndex].done === false ? false : current.completed;
+
+    const apply = (task: Partial<ActionTask>) =>
+      setPropertyEntries((prev) =>
+        prev.map((entry) => {
+          if (entry.property.id !== activePropertyId) return entry;
+          return {
+            ...entry,
+            plan: { ...entry.plan, tasks: entry.plan.tasks.map((t) => (t.id === taskId ? { ...t, ...task } : t)) },
+          };
+        })
+      );
+
+    apply({
+      steps,
+      completed,
+      completedAt: completed ? current.completedAt ?? new Date().toISOString() : undefined,
+    });
+
+    fetch(`/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(completed !== current.completed ? { steps, completed } : { steps }),
+    })
+      .then((res) => { if (!res.ok) throw new Error('Failed to save'); })
+      .catch(() => {
+        apply({ steps: current.steps, completed: current.completed, completedAt: current.completedAt });
+        setAnalyzeError('Could not save your checklist. Try again.');
+      });
+  }, [activePropertyId, plan]);
 
   const completeTask = useCallback((taskId: string) => {
     const current = plan?.tasks.find((t) => t.id === taskId);
@@ -424,8 +568,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         boundary: activeEntry?.boundary ?? boundary, setBoundary,
         property, plan, insights,
         tier, propertyLimit, canAddProperty,
-        isAnalyzing, analyzeError,
-        analyzeAndPlan, regeneratePlan, completeTask, replaceTask,
+        isAnalyzing, analyzeStage, analyzeError,
+        analyzeAndPlan, regeneratePlan, refreshInsights, monthlyUpdate, completeTask, toggleTaskStep, replaceTask,
         switchProperty, removeProperty,
         reset, resetAll,
       }}

@@ -4,7 +4,7 @@
 
 ## What this is
 
-A Next.js 14 web app that takes a property address, fetches parcel boundary data, runs it through Claude AI, and generates a personalized land management action plan — covering soil health, wildlife habitat, native plants, and more.
+A Next.js 15 web app that takes a property address, fetches parcel boundary data, runs it through Claude AI, and generates a personalized land management action plan — covering soil health, wildlife habitat, native plants, and more.
 
 ---
 
@@ -121,7 +121,7 @@ In your Vercel project → **Settings → Environment Variables**, add:
 | `STRIPE_WEBHOOK_SECRET` | `whsec_...` | See below — created per-environment, not reused from local dev |
 | `NEXT_PUBLIC_APP_URL` | `https://your-app.vercel.app` | Your Vercel deployment URL |
 
-Run `npx drizzle-kit push` once against your Neon `DATABASE_URL` to create the `properties`, `plans`, `tasks`, and `subscriptions` tables before the first deploy.
+Run `npx drizzle-kit push` once against your Neon `DATABASE_URL` to create the `properties`, `plans`, `tasks`, `subscriptions`, and `ai_usage` tables before the first deploy. Re-run it whenever `lib/db/schema.ts` changes (it only adds what's missing).
 
 **Production Stripe webhook:** in the Stripe Dashboard → **Developers → Webhooks → Add endpoint**, use `https://your-app.vercel.app/api/stripe/webhook` and subscribe to `checkout.session.completed`, `customer.subscription.updated`, and `customer.subscription.deleted`. Copy that endpoint's signing secret into `STRIPE_WEBHOOK_SECRET` in Vercel — it's different from the one the Stripe CLI gives you for local dev.
 
@@ -178,6 +178,9 @@ lib/
     schema.ts                       # properties, plans, tasks, subscriptions tables
     ownership.ts                    # Per-user property/task ownership checks
     subscriptions.ts                # Per-user subscription row lookups/upserts
+  rate-limit.ts                     # Per-user daily cap on AI routes (ai_usage table; fails open)
+  pricing.ts                        # Plan names, prices, and feature copy (landing + /upgrade)
+  legal.ts                          # Contact email, business name, dates for /privacy and /terms
 
 scripts/
   stripe-setup.ts                   # One-off: creates Stripe Products/Prices (npm run stripe:setup)
@@ -190,7 +193,9 @@ types/
 
 > **Known limitations:**
 > - `/api/set-tier` is a developer convenience for testing tier-gated features locally without going through Stripe Checkout; it returns 403 when `NODE_ENV=production`.
-> - Tier-based limits (property count, AI plan depth, feature locks) are enforced client-side and at AI-prompt time, not re-verified server-side against the caller's actual `subscriptions` row on every request. Billing itself is real — a user's `tier` accurately reflects what they paid for — but a motivated user hitting the API directly could currently claim a higher tier than they have. Hardening this is a follow-up, not yet done.
+> - Tier limits are enforced server-side: AI routes read the tier from Clerk `publicMetadata` (server-writable only, via `lib/tier-server.ts`) and ignore any tier sent by the browser. Property limits are checked in `/api/analyze-property` and `POST /api/properties`; task swapping and Species ID return 403 on the Free plan.
+> - AI routes have a per-user daily cap (rolling 24 hours) set in `DAILY_AI_LIMITS` in `lib/rate-limit.ts`. Over the limit returns a friendly 429. If the `ai_usage` table is missing the cap is skipped (fails open) and a warning is logged — run `npx drizzle-kit push` to turn it on.
+> - `/privacy` and `/terms` are drafts for legal review. Edit `lib/legal.ts` (contact email, business name, governing-law state) and set `LEGAL_DRAFT = false` once reviewed.
 
 ---
 
@@ -198,7 +203,7 @@ types/
 
 | Service | Purpose | Free tier? |
 |---------|---------|------------|
-| [Anthropic Claude](https://docs.anthropic.com) | Property analysis + plan generation | Pay per token (~$0.01/analysis) |
+| [Anthropic Claude](https://docs.anthropic.com) | Property analysis, plan generation, task chat, Species ID fallback | Pay per token (Opus plan generation can be well above $0.10 per plan) |
 | [Mapbox](https://docs.mapbox.com) | Satellite map tiles | 50k loads/mo free |
 | [Regrid](https://regrid.com/api) | Parcel boundary data | Limited free tier |
 | [USDA Soil Survey](https://sdmdataaccess.sc.egov.usda.gov) | Soil composition by location | Free |

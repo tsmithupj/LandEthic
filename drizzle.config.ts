@@ -1,4 +1,8 @@
 import { defineConfig } from 'drizzle-kit';
+import { loadEnvConfig } from '@next/env';
+
+// Load .env.local (same as Next.js does) so `npx drizzle-kit push` finds DATABASE_URL.
+loadEnvConfig(process.cwd());
 
 export default defineConfig({
   schema: './lib/db/schema.ts',

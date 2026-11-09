@@ -4,7 +4,8 @@ import { auth } from '@clerk/nextjs/server';
 import { eq, desc } from 'drizzle-orm';
 import { getDb } from '@/lib/db/client';
 import { properties, plans, tasks } from '@/lib/db/schema';
-import { toPropertyEntry } from '@/lib/db/mappers';
+import { toPropertyEntry, toTaskInsert } from '@/lib/db/mappers';
+import { getUserTier, getPropertyAllowance } from '@/lib/tier-server';
 import type { PropertyEntry } from '@/lib/store';
 import type { PropertyProfile, ActionPlan } from '@/types';
 
@@ -51,6 +52,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'profile and plan are required' }, { status: 400 });
   }
 
+  const allowance = await getPropertyAllowance(userId, await getUserTier());
+  if (!allowance.canAdd) {
+    return NextResponse.json({ error: 'Property limit reached for your plan' }, { status: 403 });
+  }
+
   const propertyId = randomUUID();
   const planId = randomUUID();
   const { profile, plan, insights, boundary } = body;
@@ -80,25 +86,7 @@ export async function POST(req: NextRequest) {
       tier: plan.tier,
       summary: plan.summary,
     }),
-    db.insert(tasks).values(
-      plan.tasks.map((t) => ({
-        id: randomUUID(),
-        planId,
-        propertyId,
-        title: t.title,
-        description: t.description,
-        whyItMatters: t.whyItMatters,
-        locationDescription: t.locationDescription,
-        impactScore: t.impactScore,
-        impactBreakdown: t.impactBreakdown,
-        recommendations: t.recommendations,
-        tags: t.tags,
-        month: t.month,
-        season: t.season,
-        tier: t.tier,
-        completed: t.completed,
-      }))
-    ),
+    db.insert(tasks).values(plan.tasks.map((t) => toTaskInsert(t, planId, propertyId))),
   ]);
 
   const [property] = await db.select().from(properties).where(eq(properties.id, propertyId));

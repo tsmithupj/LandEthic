@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Map as MapboxMap, MapMouseEvent } from 'mapbox-gl';
 import type { Feature } from 'geojson';
+import { Icon } from '@/components/brand';
 
 interface DrawablePropertyMapProps {
   address: string;
@@ -208,11 +209,11 @@ export default function DrawablePropertyMap({
   if (!hasToken) {
     return (
       <div
-        className={`rounded-2xl flex items-center justify-center bg-green-50 ${className}`}
+        className={`rounded-2xl flex items-center justify-center border border-paper-line bg-forest-50 ${className}`}
         style={{ minHeight: 360 }}
       >
-        <p className="text-sm text-green-700 text-center px-4">
-          Add <code>NEXT_PUBLIC_MAPBOX_TOKEN</code> to <code>.env.local</code> to enable the map
+        <p className="px-4 text-center text-sm text-forest-800">
+          The map is not available right now. Please try again later.
         </p>
       </div>
     );
@@ -223,8 +224,8 @@ export default function DrawablePropertyMap({
       {/* Loading overlay while geocoding */}
       {geocoding && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 rounded-2xl">
-          <div className="bg-white rounded-xl px-5 py-3 text-sm font-medium text-gray-800 shadow-lg">
-            📍 Finding your property…
+          <div className="flex items-center gap-2 rounded-xl bg-cream px-5 py-3 text-sm font-medium text-ink shadow-lg">
+            <Icon.Pin size={16} className="text-forest-700" /> Finding your property…
           </div>
         </div>
       )}
@@ -234,23 +235,20 @@ export default function DrawablePropertyMap({
 
       {/* Instruction banner */}
       {ready && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-          <div className="bg-black/70 text-white text-xs font-medium px-3 py-2 rounded-lg whitespace-nowrap">
-            {points.length === 0 && '📌 Click your property corners to draw a boundary'}
-            {points.length === 1 && 'Keep clicking to add boundary points'}
+        <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex justify-center">
+          <div className="rounded-lg bg-ink/80 px-3 py-2 text-center text-xs font-medium text-cream">
+            {points.length === 0 && 'Tap your property corners to draw a boundary'}
+            {points.length === 1 && 'Keep tapping to add boundary points'}
             {points.length === 2 && 'Add at least one more point'}
-            {points.length >= 3 && `✓ ${points.length} points — add more or click Confirm below`}
+            {points.length >= 3 && `${points.length} points — add more or tap Confirm below`}
           </div>
         </div>
       )}
 
       {/* Acreage badge */}
       {acreage > 0 && (
-        <div
-          className="absolute bottom-3 left-3 z-10 bg-white/90 text-xs font-semibold px-3 py-1.5 rounded-lg"
-          style={{ color: '#3B6D11' }}
-        >
-          📐 ~{acreage.toFixed(1)} acres
+        <div className="absolute bottom-3 left-3 z-10 rounded-lg bg-cream/90 px-3 py-1.5 text-xs font-semibold text-forest-700">
+          ~{acreage.toFixed(1)} acres
         </div>
       )}
 
@@ -259,15 +257,15 @@ export default function DrawablePropertyMap({
         <div className="absolute bottom-3 right-3 z-10 flex gap-2">
           <button
             onClick={handleUndo}
-            className="bg-white/90 text-xs font-medium px-3 py-1.5 rounded-lg text-gray-600 hover:bg-white transition-colors shadow-sm"
+            className="bg-cream/90 text-xs font-medium px-3 py-1.5 rounded-lg text-ink-soft hover:bg-cream transition-colors shadow-none"
           >
-            ↩ Undo
+            Undo
           </button>
           <button
             onClick={handleClear}
-            className="bg-white/90 text-xs font-medium px-3 py-1.5 rounded-lg text-red-500 hover:bg-white transition-colors shadow-sm"
+            className="bg-cream/90 text-xs font-medium px-3 py-1.5 rounded-lg text-rust-700 hover:bg-cream transition-colors shadow-none"
           >
-            ✕ Clear
+            Clear
           </button>
         </div>
       )}

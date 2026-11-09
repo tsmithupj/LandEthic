@@ -1,10 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@/lib/db/client';
 import { plans, tasks } from '@/lib/db/schema';
-import { toActionPlan } from '@/lib/db/mappers';
+import { toActionPlan, toTaskInsert } from '@/lib/db/mappers';
 import { getOwnedProperty } from '@/lib/db/ownership';
 import type { ActionPlan } from '@/types';
 
@@ -27,27 +26,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     db.delete(tasks).where(eq(tasks.planId, existingPlan.id)),
     db
       .update(plans)
-      .set({ tier: body.plan.tier, summary: body.plan.summary, generatedAt: new Date() })
+      .set({ tier: body.plan.tier, summary: body.plan.summary, generatedAt: new Date(), lastMonthlyUpdate: null, monthlyNote: null })
       .where(eq(plans.id, existingPlan.id)),
-    db.insert(tasks).values(
-      body.plan.tasks.map((t) => ({
-        id: randomUUID(),
-        planId: existingPlan.id,
-        propertyId,
-        title: t.title,
-        description: t.description,
-        whyItMatters: t.whyItMatters,
-        locationDescription: t.locationDescription,
-        impactScore: t.impactScore,
-        impactBreakdown: t.impactBreakdown,
-        recommendations: t.recommendations,
-        tags: t.tags,
-        month: t.month,
-        season: t.season,
-        tier: t.tier,
-        completed: t.completed,
-      }))
-    ),
+    db.insert(tasks).values(body.plan.tasks.map((t) => toTaskInsert(t, existingPlan.id, propertyId))),
   ]);
 
   const [savedPlan] = await db.select().from(plans).where(eq(plans.id, existingPlan.id));

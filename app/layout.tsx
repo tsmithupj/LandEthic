@@ -1,8 +1,23 @@
 import type { Metadata } from "next";
+import { Arvo, Public_Sans } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { StoreProvider } from "@/lib/store";
+
+const arvo = Arvo({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  style: ["normal", "italic"],
+  variable: "--font-arvo",
+  display: "swap",
+});
+
+const publicSans = Public_Sans({
+  subsets: ["latin"],
+  variable: "--font-public-sans",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "LandEthic.io — AI-powered land stewardship",
@@ -18,25 +33,30 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider
+      afterSignOutUrl="/"
       appearance={{
         variables: {
           colorPrimary: "#3B6D11",
-          colorBackground: "#ffffff",
-          borderRadius: "0.75rem",
+          colorBackground: "#FBF6EC",
+          colorText: "#2A2116",
+          colorTextSecondary: "#6B5D48",
+          colorInputBackground: "#FFFFFF",
+          fontFamily: "var(--font-public-sans), -apple-system, sans-serif",
+          borderRadius: "0.625rem",
         },
         elements: {
-          formButtonPrimary: "bg-[#3B6D11] hover:bg-[#2D5409]",
-          card: "shadow-none border border-gray-100",
-          headerTitle: "text-gray-900",
-          socialButtonsBlockButton: "border-gray-200",
+          formButtonPrimary: "bg-forest-700 hover:bg-forest-800",
+          card: "shadow-none border border-paper-line",
+          headerTitle: "font-display text-ink",
+          socialButtonsBlockButton: "border-paper-line",
         },
       }}
     >
       <html
         lang="en"
-        className="h-full antialiased"
+        className={`h-full antialiased ${arvo.variable} ${publicSans.variable}`}
       >
-        <body className="min-h-full flex flex-col">
+        <body className="min-h-full flex flex-col bg-cream text-ink">
           <StoreProvider>{children}</StoreProvider>
         </body>
       </html>

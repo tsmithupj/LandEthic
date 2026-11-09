@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Map as MapboxMap } from 'mapbox-gl';
-import type { InsightZone } from '@/lib/store';
+import { Icon } from '@/components/brand';
 
 interface DashboardMapProps {
   boundary: number[][][] | null;
@@ -11,90 +11,28 @@ interface DashboardMapProps {
   acreage?: number;
   county?: string;
   state?: string;
-  activeZone?: InsightZone | null;
-  activeZoneLabel?: string | null;
-  activeZoneType?: 'positive' | 'warning' | 'opportunity' | null;
   height?: number;
   propertyId?: string;
   autoFlyover?: boolean;
+  /** A spot to outline on the map (e.g. the selected insight's area). */
+  highlight?: MapHighlight | null;
+  /** Several spots to outline at once, each with a numbered pin (e.g. food plots). */
+  features?: MapFeature[];
 }
 
-// ── Sutherland-Hodgman polygon clipping ─────────────────────────────────────
-// Clips a subject polygon to a convex (or near-convex) clip polygon.
-// Returns the clipped ring, or the original if clipping fails/reduces to nothing.
-
-function isLeftOf(a: number[], b: number[], p: number[]): boolean {
-  return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0;
+export interface MapFeature {
+  /** Closed ring of [lng, lat]. */
+  ring: number[][];
+  color: string;
+  /** Shown in the pin, e.g. 1, 2, 3. */
+  number?: number;
 }
 
-function segIntersect(p1: number[], p2: number[], p3: number[], p4: number[]): number[] | null {
-  const d1x = p2[0] - p1[0], d1y = p2[1] - p1[1];
-  const d2x = p4[0] - p3[0], d2y = p4[1] - p3[1];
-  const cross = d1x * d2y - d1y * d2x;
-  if (Math.abs(cross) < 1e-12) return null;
-  const t = ((p3[0] - p1[0]) * d2y - (p3[1] - p1[1]) * d2x) / cross;
-  return [p1[0] + t * d1x, p1[1] + t * d1y];
-}
-
-function clipPolygon(subject: number[][], clip: number[][]): number[][] {
-  let output = subject.slice(0, subject.length - 1); // drop closing coord
-  const n = clip.length - 1; // clip ring length (closing coord excluded)
-
-  for (let i = 0; i < n; i++) {
-    if (output.length === 0) return [];
-    const input = output.slice();
-    output = [];
-    const a = clip[i];
-    const b = clip[(i + 1) % n];
-
-    for (let j = 0; j < input.length; j++) {
-      const curr = input[j];
-      const prev = input[(j + input.length - 1) % input.length];
-      const currIn = isLeftOf(a, b, curr);
-      const prevIn = isLeftOf(a, b, prev);
-
-      if (currIn) {
-        if (!prevIn) {
-          const ix = segIntersect(prev, curr, a, b);
-          if (ix) output.push(ix);
-        }
-        output.push(curr);
-      } else if (prevIn) {
-        const ix = segIntersect(prev, curr, a, b);
-        if (ix) output.push(ix);
-      }
-    }
-  }
-
-  if (output.length < 3) return subject; // clipping failed, use original
-  return [...output, output[0]]; // close ring
-}
-
-// ── Zone sub-polygon (bbox subdivision for insight highlights) ───────────────
-function getZonePolygon(coords: number[][], zone: InsightZone): number[][] {
-  const lngs = coords.map((c) => c[0]);
-  const lats  = coords.map((c) => c[1]);
-  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-  const minLat = Math.min(...lats),  maxLat = Math.max(...lats);
-  const midLng = (minLng + maxLng) / 2;
-  const midLat = (minLat + maxLat) / 2;
-
-  const p: Record<InsightZone, number[][]> = {
-    full:     [[minLng,minLat],[maxLng,minLat],[maxLng,maxLat],[minLng,maxLat],[minLng,minLat]],
-    north:    [[minLng,midLat],[maxLng,midLat],[maxLng,maxLat],[minLng,maxLat],[minLng,midLat]],
-    south:    [[minLng,minLat],[maxLng,minLat],[maxLng,midLat],[minLng,midLat],[minLng,minLat]],
-    east:     [[midLng,minLat],[maxLng,minLat],[maxLng,maxLat],[midLng,maxLat],[midLng,minLat]],
-    west:     [[minLng,minLat],[midLng,minLat],[midLng,maxLat],[minLng,maxLat],[minLng,minLat]],
-    center:   [
-      [minLng+(maxLng-minLng)*0.25, minLat+(maxLat-minLat)*0.25],
-      [minLng+(maxLng-minLng)*0.75, minLat+(maxLat-minLat)*0.25],
-      [minLng+(maxLng-minLng)*0.75, minLat+(maxLat-minLat)*0.75],
-      [minLng+(maxLng-minLng)*0.25, minLat+(maxLat-minLat)*0.75],
-      [minLng+(maxLng-minLng)*0.25, minLat+(maxLat-minLat)*0.25],
-    ],
-    perimeter:[[minLng,minLat],[maxLng,minLat],[maxLng,maxLat],[minLng,maxLat],[minLng,minLat]],
-  };
-  return p[zone] ?? p.full;
+export interface MapHighlight {
+  /** Closed ring of [lng, lat]. */
+  ring: number[][];
+  color: string;
+  label?: string;
 }
 
 export default function DashboardMap({
@@ -104,122 +42,120 @@ export default function DashboardMap({
   acreage,
   county,
   state,
-  activeZone,
-  activeZoneType,
   height = 320,
   propertyId,
   autoFlyover = true,
+  highlight = null,
+  features,
 }: DashboardMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<MapboxMap | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
-  // Keep zone props in refs so they're always current inside async callbacks
-  const activeZoneRef    = useRef(activeZone);
-  const activeZoneTypeRef= useRef(activeZoneType);
+  // Keep boundary in a ref so it's always current inside async callbacks
   const boundaryRef      = useRef(boundary);
-
-  useEffect(() => { activeZoneRef.current    = activeZone;    }, [activeZone]);
-  useEffect(() => { activeZoneTypeRef.current= activeZoneType;}, [activeZoneType]);
   useEffect(() => { boundaryRef.current      = boundary;      }, [boundary]);
+  const highlightRef     = useRef(highlight);
+  useEffect(() => { highlightRef.current     = highlight;     }, [highlight]);
+  const featuresRef      = useRef(features);
+  useEffect(() => { featuresRef.current      = features;      }, [features]);
+  const markersRef       = useRef<{ remove: () => void }[]>([]);
+  const mapboxRef        = useRef<typeof import('mapbox-gl').default | null>(null);
 
   const [is3D,     setIs3D]     = useState(false);
   const [animating,setAnimating]= useState(false);
   const [loaded,   setLoaded]   = useState(false);
 
-  // ── Core highlight-drawing function ─────────────────────────────────────
-  function drawZoneHighlight(map: MapboxMap | null) {
+  // ── Outline the highlighted spot and move the camera to it ──────────────
+  function drawHighlight(map: MapboxMap | null) {
     if (!map) return;
+    if (map.getLayer('highlight-fill')) map.removeLayer('highlight-fill');
+    if (map.getLayer('highlight-line')) map.removeLayer('highlight-line');
+    if (map.getSource('highlight'))     map.removeSource('highlight');
 
-    // Clear stale layers
-    if (map.getLayer('zone-highlight-fill')) map.removeLayer('zone-highlight-fill');
-    if (map.getLayer('zone-highlight-line')) map.removeLayer('zone-highlight-line');
-    if (map.getSource('zone-highlight'))     map.removeSource('zone-highlight');
+    const hl = highlightRef.current;
+    if (!hl || hl.ring.length < 4) return;
 
-    const bnd = boundaryRef.current;
-    if (!bnd?.[0]) return;
+    // Stop the flyover so the camera can settle on the spot
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    setAnimating(false);
+    setIs3D(false);
 
-    const propRing = bnd[0]; // outer ring of property polygon
-    const lngs = propRing.map((c: number[]) => c[0]);
-    const lats  = propRing.map((c: number[]) => c[1]);
-    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-    const minLat = Math.min(...lats),  maxLat = Math.max(...lats);
-    const spanLng = maxLng - minLng;
-    const spanLat = maxLat - minLat;
+    map.addSource('highlight', {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [hl.ring] }, properties: {} },
+    });
+    map.addLayer({
+      id: 'highlight-fill',
+      type: 'fill',
+      source: 'highlight',
+      paint: { 'fill-color': hl.color, 'fill-opacity': 0.35 },
+    });
+    map.addLayer({
+      id: 'highlight-line',
+      type: 'line',
+      source: 'highlight',
+      paint: { 'line-color': hl.color, 'line-width': 3, 'line-dasharray': [2, 1.5] },
+    });
 
-    const az  = activeZoneRef.current;
-    const azt = activeZoneTypeRef.current;
+    // Frame the spot together with the property so the owner sees where it sits
+    const pts = [...hl.ring, ...(boundaryRef.current?.[0] ?? [])];
+    const lngs = pts.map((c) => c[0]);
+    const lats = pts.map((c) => c[1]);
+    map.fitBounds(
+      [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+      { padding: 50, duration: 900, maxZoom: 18, pitch: 0, bearing: 0 }
+    );
+  }
 
-    let rawPolygon: number[][] | null = null;
-    let color: string;
-    const fillOpacity = 0.28;
-    const lineWidth = 2.5;
-    let dashed = false;
-    let geojsonCoords: number[][][];
+  // ── Outline several spots at once, each with a numbered pin ─────────────
+  function drawFeatures(map: MapboxMap | null) {
+    if (!map) return;
+    markersRef.current.forEach((m) => m.remove());
+    markersRef.current = [];
+    if (map.getLayer('features-fill')) map.removeLayer('features-fill');
+    if (map.getLayer('features-line')) map.removeLayer('features-line');
+    if (map.getSource('features'))     map.removeSource('features');
 
-    if (az) {
-      // ── Insight zone (bbox subdivision, type-colored, dashed) ────────────
-      const zoneRaw = getZonePolygon(propRing, az);
-      const clipped = clipPolygon(zoneRaw, propRing);
-      rawPolygon = clipped;
+    const list = (featuresRef.current ?? []).filter((f) => f.ring.length >= 4);
+    if (!list.length) return;
 
-      color =
-        azt === 'positive'    ? '#97C459' :
-        azt === 'warning'     ? '#F59E0B' :
-        azt === 'opportunity' ? '#38BDF8' :
-                                '#97C459';
-      dashed = true;
-
-      // Perimeter: add a hole so it looks like a ring instead of full overlay
-      if (az === 'perimeter') {
-        const inset = 0.18;
-        const innerRing = [
-          [minLng+spanLng*inset, minLat+spanLat*inset],
-          [maxLng-spanLng*inset, minLat+spanLat*inset],
-          [maxLng-spanLng*inset, maxLat-spanLat*inset],
-          [minLng+spanLng*inset, maxLat-spanLat*inset],
-          [minLng+spanLng*inset, minLat+spanLat*inset],
-        ];
-        geojsonCoords = [rawPolygon, innerRing];
-      } else {
-        geojsonCoords = [rawPolygon];
-      }
-    } else {
-      return; // nothing to draw
-    }
-
-    map.addSource('zone-highlight', {
+    map.addSource('features', {
       type: 'geojson',
       data: {
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: geojsonCoords },
-        properties: {},
+        type: 'FeatureCollection',
+        features: list.map((f) => ({
+          type: 'Feature' as const,
+          geometry: { type: 'Polygon' as const, coordinates: [f.ring] },
+          properties: { color: f.color },
+        })),
       },
     });
-
+    const before = map.getLayer('highlight-fill') ? 'highlight-fill' : undefined;
     map.addLayer({
-      id: 'zone-highlight-fill',
+      id: 'features-fill',
       type: 'fill',
-      source: 'zone-highlight',
-      paint: { 'fill-color': color, 'fill-opacity': fillOpacity },
-    });
-
-    const linePaint: Record<string, unknown> = { 'line-color': color, 'line-width': lineWidth };
-    if (dashed) linePaint['line-dasharray'] = [3, 2];
-
+      source: 'features',
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.25 },
+    }, before);
     map.addLayer({
-      id: 'zone-highlight-line',
+      id: 'features-line',
       type: 'line',
-      source: 'zone-highlight',
-      paint: linePaint,
-    });
+      source: 'features',
+      paint: { 'line-color': ['get', 'color'], 'line-width': 2 },
+    }, before);
 
-    // Gently pan map toward the highlighted area's center
-    if (rawPolygon && rawPolygon.length > 1) {
-      const pts = rawPolygon.slice(0, -1); // drop closing coord
-      const cLng = pts.reduce((s, c) => s + c[0], 0) / pts.length;
-      const cLat = pts.reduce((s, c) => s + c[1], 0) / pts.length;
-      map.easeTo({ center: [cLng, cLat], duration: 700, zoom: map.getZoom() });
+    const mapboxgl = mapboxRef.current;
+    if (!mapboxgl) return;
+    for (const f of list) {
+      if (f.number === undefined) continue;
+      const pts = f.ring.slice(0, -1);
+      const lng = pts.reduce((a, c) => a + c[0], 0) / pts.length;
+      const lat = pts.reduce((a, c) => a + c[1], 0) / pts.length;
+      const el = document.createElement('div');
+      el.textContent = String(f.number);
+      el.style.cssText = `width:22px;height:22px;border-radius:9999px;background:${f.color};color:#fff;font:700 12px/22px 'Public Sans',sans-serif;text-align:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)`;
+      markersRef.current.push(new mapboxgl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map));
     }
   }
 
@@ -287,6 +223,7 @@ export default function DashboardMap({
     (async () => {
       const mapboxgl = (await import('mapbox-gl')).default;
       mapboxgl.accessToken = token;
+      mapboxRef.current = mapboxgl;
 
       let center: [number, number];
       let bounds: [[number, number], [number, number]] | null = null;
@@ -362,10 +299,8 @@ export default function DashboardMap({
 
         mapRef.current = map;
         setLoaded(true);
-
-        // Draw zone highlight immediately — using refs so we always have
-        // the latest prop values regardless of React render timing
-        drawZoneHighlight(map);
+        drawFeatures(map);
+        drawHighlight(map);
 
         // Flyover logic
         const flyKey    = propertyId ? `landethic_flyover_${propertyId}` : null;
@@ -386,11 +321,17 @@ export default function DashboardMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Re-draw zone highlight when props change after map is loaded ─────────
+  // ── Re-draw the outlined spots whenever they change ──────────────────────
   useEffect(() => {
     if (!loaded) return;
-    drawZoneHighlight(mapRef.current);
-  }, [activeZone, activeZoneType, loaded]);
+    drawFeatures(mapRef.current);
+  }, [features, loaded]);
+
+  // ── Re-draw the highlight whenever the selected spot changes ─────────────
+  useEffect(() => {
+    if (!loaded) return;
+    drawHighlight(mapRef.current);
+  }, [highlight, loaded]);
 
   // ── Toggle 3D ────────────────────────────────────────────────────────────
   const toggle3D = () => {
@@ -426,6 +367,17 @@ export default function DashboardMap({
         </div>
       )}
 
+      {/* Highlighted spot label */}
+      {loaded && highlight?.label && (
+        <div
+          className="absolute bottom-4 left-4 z-10 flex max-w-[60%] items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm"
+          style={{ background: 'rgba(0,0,0,0.6)', border: `1.5px solid ${highlight.color}` }}
+        >
+          <Icon.Pin size={13} />
+          <span className="truncate">{highlight.label}</span>
+        </div>
+      )}
+
       {/* 3D flyover button */}
       {loaded && (
         <div className="absolute bottom-4 right-4 z-10">
@@ -448,7 +400,11 @@ export default function DashboardMap({
                 />
                 Flying…
               </>
-            ) : is3D ? '⬆ Flat view' : '🌐 3D flyover'}
+            ) : is3D ? 'Flat view' : (
+              <>
+                <Icon.Compass size={14} /> 3D flyover
+              </>
+            )}
           </button>
         </div>
       )}
