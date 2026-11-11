@@ -37,24 +37,33 @@ function ImpactBadge({ score }: { score: number }) {
 }
 
 function EcoScoreRing({ score }: { score: number }) {
+  const value = Math.max(0, Math.min(100, Math.round(score)));
   const r = 36;
   const circ = 2 * Math.PI * r;
-  const dash = circ * (score / 100);
+  const dash = circ * (value / 100);
   return (
-    <div className="relative h-24 w-24 flex-shrink-0">
-      <svg width="96" height="96" className="-rotate-90" viewBox="0 0 96 96" aria-hidden="true">
-        <circle cx="48" cy="48" r={r} fill="none" stroke="#EAF3DE" strokeWidth="8" />
-        <circle
-          cx="48" cy="48" r={r} fill="none"
-          stroke="#3B6D11" strokeWidth="8"
-          strokeDasharray={`${dash} ${circ - dash}`}
-          strokeLinecap="round"
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="font-display text-2xl font-bold leading-none text-forest-700">{score}</span>
-        <span className="mt-1 text-[10px] font-bold uppercase tracking-[0.1em] text-ink-faint">land health</span>
+    // Number inside the ring, label underneath — the label is too wide to fit inside it
+    <div className="flex w-24 flex-shrink-0 flex-col items-center" role="img" aria-label={`Land health ${value} out of 100`}>
+      <div className="relative h-24 w-24">
+        <svg width="96" height="96" className="-rotate-90" viewBox="0 0 96 96" aria-hidden="true">
+          <circle cx="48" cy="48" r={r} fill="none" stroke="#EAF3DE" strokeWidth="8" />
+          {value > 0 && (
+            <circle
+              cx="48" cy="48" r={r} fill="none"
+              stroke="#3B6D11" strokeWidth="8"
+              strokeDasharray={`${dash} ${circ - dash}`}
+              strokeLinecap="round"
+            />
+          )}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center" aria-hidden="true">
+          <span className="font-display text-[28px] font-bold leading-none text-forest-700">{value}</span>
+          <span className="mt-0.5 text-[10px] font-semibold leading-none text-ink-faint">of 100</span>
+        </div>
       </div>
+      <span className="mt-1.5 whitespace-nowrap text-[10px] font-bold uppercase tracking-[0.1em] text-ink-soft" aria-hidden="true">
+        Land health
+      </span>
     </div>
   );
 }
@@ -567,7 +576,7 @@ function DashboardPageContent() {
 
         {/* Property header */}
         <div className="card p-5">
-          <div className="flex items-center gap-4 sm:gap-5">
+          <div className="flex items-start gap-4 sm:gap-5">
             <EcoScoreRing score={ecosystemScore} />
             <div className="min-w-0 flex-1">
               <h1 className="text-xl font-bold leading-tight text-ink">{property.name}</h1>
