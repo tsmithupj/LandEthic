@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import type { Map as MapboxMap } from 'mapbox-gl';
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
+import type { GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 import { Icon } from '@/components/brand';
 import { clipToProperty, shapeCenter, shapePoints } from '@/lib/geo';
 
@@ -36,7 +36,26 @@ export interface MapHighlight {
   label?: string;
 }
 
-export default function DashboardMap({
+const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+/**
+ * Create a GeoJSON source, or swap the data of an existing one.
+ * Never removes sources: removing one while 3D terrain is still loading crashes
+ * Mapbox ("Cannot read properties of undefined (reading 'get')"), which took the
+ * whole task page down.
+ */
+function setGeoJson(map: MapboxMap, id: string, data: GeoJSON.Feature | GeoJSON.FeatureCollection) {
+  const source = map.getSource(id) as GeoJSONSource | undefined;
+  if (source) source.setData(data);
+  else map.addSource(id, { type: 'geojson', data });
+}
+
+/** True while the map is still on the page (not removed). */
+function isLive(map: MapboxMap | null): map is MapboxMap {
+  return !!map && !!(map as unknown as { style?: unknown }).style;
+}
+
+function DashboardMapInner({
   boundary,
   address,
   propertyName,
@@ -69,99 +88,95 @@ export default function DashboardMap({
 
   // ── Outline the highlighted spot and move the camera to it ──────────────
   function drawHighlight(map: MapboxMap | null) {
-    if (!map) return;
-    if (map.getLayer('highlight-fill')) map.removeLayer('highlight-fill');
-    if (map.getLayer('highlight-line')) map.removeLayer('highlight-line');
-    if (map.getSource('highlight'))     map.removeSource('highlight');
+    if (!isLive(map)) return;
+    try {
+      const hl = highlightRef.current;
+      // Only ever show the part of the spot that is inside the property line
+      const shape = hl && hl.ring.length >= 4 ? clipToProperty(hl.ring, boundaryRef.current) : null;
 
-    const hl = highlightRef.current;
-    if (!hl || hl.ring.length < 4) return;
-    // Only ever show the part of the spot that is inside the property line
-    const shape = clipToProperty(hl.ring, boundaryRef.current);
-    if (!shape) return;
+      setGeoJson(map, 'highlight', shape ? { type: 'Feature', geometry: shape, properties: {} } : EMPTY);
+      const color = hl?.color ?? '#ffffff';
+      if (!map.getLayer('highlight-fill')) {
+        map.addLayer({ id: 'highlight-fill', type: 'fill', source: 'highlight', paint: { 'fill-color': color, 'fill-opacity': 0.35 } });
+      } else {
+        map.setPaintProperty('highlight-fill', 'fill-color', color);
+      }
+      if (!map.getLayer('highlight-line')) {
+        map.addLayer({ id: 'highlight-line', type: 'line', source: 'highlight', paint: { 'line-color': color, 'line-width': 3, 'line-dasharray': [2, 1.5] } });
+      } else {
+        map.setPaintProperty('highlight-line', 'line-color', color);
+      }
+      if (!shape) return;
 
-    // Stop the flyover so the camera can settle on the spot
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    setAnimating(false);
-    setIs3D(false);
+      // Stop the flyover so the camera can settle on the spot
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      setAnimating(false);
+      setIs3D(false);
 
-    map.addSource('highlight', {
-      type: 'geojson',
-      data: { type: 'Feature', geometry: shape, properties: {} },
-    });
-    map.addLayer({
-      id: 'highlight-fill',
-      type: 'fill',
-      source: 'highlight',
-      paint: { 'fill-color': hl.color, 'fill-opacity': 0.35 },
-    });
-    map.addLayer({
-      id: 'highlight-line',
-      type: 'line',
-      source: 'highlight',
-      paint: { 'line-color': hl.color, 'line-width': 3, 'line-dasharray': [2, 1.5] },
-    });
-
-    // Frame the spot together with the property so the owner sees where it sits
-    const pts = [...shapePoints(shape), ...(boundaryRef.current?.[0] ?? [])];
-    const lngs = pts.map((c) => c[0]);
-    const lats = pts.map((c) => c[1]);
-    map.fitBounds(
-      [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
-      { padding: 50, duration: 900, maxZoom: 18, pitch: 0, bearing: 0 }
-    );
+      // Frame the spot together with the property so the owner sees where it sits
+      const pts = [...shapePoints(shape), ...(boundaryRef.current?.[0] ?? [])];
+      const lngs = pts.map((c) => c[0]);
+      const lats = pts.map((c) => c[1]);
+      map.fitBounds(
+        [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+        { padding: 50, duration: 900, maxZoom: 18, pitch: 0, bearing: 0 }
+      );
+    } catch (err) {
+      // A map hiccup must never take the page down
+      console.warn('[map] could not outline the spot:', err);
+    }
   }
 
   // ── Outline several spots at once, each with a numbered pin ─────────────
   function drawFeatures(map: MapboxMap | null) {
-    if (!map) return;
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
-    if (map.getLayer('features-fill')) map.removeLayer('features-fill');
-    if (map.getLayer('features-line')) map.removeLayer('features-line');
-    if (map.getSource('features'))     map.removeSource('features');
+    if (!isLive(map)) return;
+    try {
+      // Trim each spot to the property line; drop spots that are really outside it
+      const list = (featuresRef.current ?? []).flatMap((f) => {
+        const shape = clipToProperty(f.ring, boundaryRef.current);
+        return shape ? [{ ...f, shape }] : [];
+      });
 
-    // Trim each spot to the property line; drop spots that are really outside it
-    const list = (featuresRef.current ?? []).flatMap((f) => {
-      const shape = clipToProperty(f.ring, boundaryRef.current);
-      return shape ? [{ ...f, shape }] : [];
-    });
-    if (!list.length) return;
-
-    map.addSource('features', {
-      type: 'geojson',
-      data: {
+      setGeoJson(map, 'features', {
         type: 'FeatureCollection',
         features: list.map((f) => ({
           type: 'Feature' as const,
           geometry: f.shape,
           properties: { color: f.color },
         })),
-      },
-    });
-    const before = map.getLayer('highlight-fill') ? 'highlight-fill' : undefined;
-    map.addLayer({
-      id: 'features-fill',
-      type: 'fill',
-      source: 'features',
-      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.25 },
-    }, before);
-    map.addLayer({
-      id: 'features-line',
-      type: 'line',
-      source: 'features',
-      paint: { 'line-color': ['get', 'color'], 'line-width': 2 },
-    }, before);
+      });
+      const before = map.getLayer('highlight-fill') ? 'highlight-fill' : undefined;
+      if (!map.getLayer('features-fill')) {
+        map.addLayer({
+          id: 'features-fill',
+          type: 'fill',
+          source: 'features',
+          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.25 },
+        }, before);
+      }
+      if (!map.getLayer('features-line')) {
+        map.addLayer({
+          id: 'features-line',
+          type: 'line',
+          source: 'features',
+          paint: { 'line-color': ['get', 'color'], 'line-width': 2 },
+        }, before);
+      }
 
-    const mapboxgl = mapboxRef.current;
-    if (!mapboxgl) return;
-    for (const f of list) {
-      if (f.number === undefined) continue;
-      const [lng, lat] = shapeCenter(f.shape);
-      const el = document.createElement('div');
-      el.textContent = String(f.number);
-      el.style.cssText = `width:22px;height:22px;border-radius:9999px;background:${f.color};color:#fff;font:700 12px/22px 'Public Sans',sans-serif;text-align:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)`;
-      markersRef.current.push(new mapboxgl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map));
+      const mapboxgl = mapboxRef.current;
+      if (!mapboxgl) return;
+      for (const f of list) {
+        if (f.number === undefined) continue;
+        const [lng, lat] = shapeCenter(f.shape);
+        const el = document.createElement('div');
+        el.textContent = String(f.number);
+        el.style.cssText = `width:22px;height:22px;border-radius:9999px;background:${f.color};color:#fff;font:700 12px/22px 'Public Sans',sans-serif;text-align:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)`;
+        markersRef.current.push(new mapboxgl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map));
+      }
+    } catch (err) {
+      console.warn('[map] could not outline the spots:', err);
     }
   }
 
@@ -188,6 +203,7 @@ export default function DashboardMap({
     const startBear = map.getBearing();
 
     function animate(ts: number) {
+      if (mapRef.current !== map || !isLive(map)) return; // map was closed
       if (!startTime) startTime = ts;
       const prog = Math.min((ts - startTime) / duration, 1);
 
@@ -224,10 +240,13 @@ export default function DashboardMap({
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) return;
 
-    let map: MapboxMap;
+    let map: MapboxMap | undefined;
+    let cancelled = false;
+    let flyTimer: ReturnType<typeof setTimeout> | undefined;
 
     (async () => {
       const mapboxgl = (await import('mapbox-gl')).default;
+      if (cancelled) return;
       mapboxgl.accessToken = token;
       mapboxRef.current = mapboxgl;
 
@@ -245,8 +264,9 @@ export default function DashboardMap({
       } else {
         center = await geocodeAddress(token);
       }
+      if (cancelled || !mapContainer.current) return;
 
-      map = new mapboxgl.Map({
+      const m = new mapboxgl.Map({
         container: mapContainer.current!,
         style:     'mapbox://styles/mapbox/satellite-streets-v12',
         center,
@@ -255,8 +275,11 @@ export default function DashboardMap({
         bearing:   0,
         antialias: true,
       });
+      map = m;
 
-      map.on('load', () => {
+      m.on('load', () => {
+        const map = m;
+        if (cancelled) return;
         // Terrain
         map.addSource('mapbox-dem', {
           type: 'raster-dem',
@@ -304,9 +327,7 @@ export default function DashboardMap({
         }
 
         mapRef.current = map;
-        setLoaded(true);
-        drawFeatures(map);
-        drawHighlight(map);
+        setLoaded(true); // the effects below then draw the outlined spots
 
         // Flyover logic
         const flyKey    = propertyId ? `landethic_flyover_${propertyId}` : null;
@@ -315,13 +336,18 @@ export default function DashboardMap({
 
         if (shouldFly) {
           if (flyKey) localStorage.setItem(flyKey, '1');
-          setTimeout(() => startFlyAround(map), 1200);
+          flyTimer = setTimeout(() => { if (!cancelled) startFlyAround(map); }, 1200);
         }
       });
     })();
 
     return () => {
+      cancelled = true;
+      if (flyTimer) clearTimeout(flyTimer);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      markersRef.current.forEach((mk) => mk.remove());
+      markersRef.current = [];
+      mapRef.current = null;
       map?.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -433,5 +459,37 @@ export default function DashboardMap({
         </div>
       )}
     </div>
+  );
+}
+
+/** If the map ever fails, show a quiet placeholder instead of taking the whole page down. */
+class MapErrorBoundary extends Component<{ height: number; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(err: unknown) {
+    console.warn('[map] the map stopped working:', err);
+  }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div
+          className="flex items-center justify-center rounded-2xl bg-forest-900 text-sm text-forest-200"
+          style={{ height: this.props.height }}
+        >
+          The map couldn&apos;t load. Refresh the page to try again.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function DashboardMap(props: DashboardMapProps) {
+  return (
+    <MapErrorBoundary height={props.height ?? 320}>
+      <DashboardMapInner {...props} />
+    </MapErrorBoundary>
   );
 }
