@@ -7,6 +7,8 @@ import { useStore } from '@/lib/store';
 import type { FoodPlot, HabitatPlan, NestingBox } from '@/types';
 import AppHeader from '@/components/AppHeader';
 import { Icon, Seal, Spinner } from '@/components/brand';
+import { clipToProperty } from '@/lib/geo';
+import { useRedirectWhenLocked } from '@/components/FreePlan';
 
 const DashboardMap = dynamic(() => import('@/components/DashboardMap'), { ssr: false });
 
@@ -95,8 +97,8 @@ function MapButton({ active, disabled, onClick }: { active: boolean; disabled: b
   );
 }
 
-function FoodPlotCard({ plot, n, color, active, onShow }: {
-  plot: FoodPlot; n: number; color: string; active: boolean; onShow: () => void;
+function FoodPlotCard({ plot, n, color, active, onShow, onMap }: {
+  plot: FoodPlot; n: number; color: string; active: boolean; onShow: () => void; onMap: boolean;
 }) {
   return (
     <div className={`card p-5 transition-shadow ${active ? 'ring-2 ring-forest-600' : ''}`}>
@@ -121,7 +123,7 @@ function FoodPlotCard({ plot, n, color, active, onShow }: {
         <div className="mt-4">
           <Label icon={<Icon.Pin size={12} />}>Where</Label>
           <p className="mt-1 text-sm leading-relaxed text-ink">{plot.where}</p>
-          <MapButton active={active} disabled={!plot.area} onClick={onShow} />
+          <MapButton active={active} disabled={!onMap} onClick={onShow} />
         </div>
       )}
 
@@ -193,8 +195,8 @@ function FoodPlotCard({ plot, n, color, active, onShow }: {
   );
 }
 
-function NestingBoxCard({ box, n, color, active, onShow }: {
-  box: NestingBox; n: number; color: string; active: boolean; onShow: () => void;
+function NestingBoxCard({ box, n, color, active, onShow, onMap }: {
+  box: NestingBox; n: number; color: string; active: boolean; onShow: () => void; onMap: boolean;
 }) {
   const facts: [string, string | undefined][] = [
     ['Mount height', box.mountHeight],
@@ -231,7 +233,7 @@ function NestingBoxCard({ box, n, color, active, onShow }: {
         <div className="mt-4">
           <Label icon={<Icon.Pin size={12} />}>Where</Label>
           <p className="mt-1 text-sm leading-relaxed text-ink">{box.where}</p>
-          <MapButton active={active} disabled={!box.area} onClick={onShow} />
+          <MapButton active={active} disabled={!onMap} onClick={onShow} />
         </div>
       )}
 
@@ -277,6 +279,7 @@ function SeedShoppingList({ plots }: { plots: FoodPlot[] }) {
 
 export default function HabitatPlanner({ kind }: { kind: Kind }) {
   const { property, tier, boundary, address, userGoalsText, activePropertyId } = useStore();
+  useRedirectWhenLocked();
   const [habitat, setHabitat] = useState<HabitatPlan | null | undefined>(undefined);
   const [building, setBuilding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -304,15 +307,15 @@ export default function HabitatPlanner({ kind }: { kind: Kind }) {
   const colorOf = (i: number) => colorFor(kind, i);
 
   const features = useMemo(
-    () => items.flatMap((it, i) => (it.area && it.area.length >= 4 ? [{ ring: it.area, color: colorFor(kind, i), number: i + 1 }] : [])),
-    [items, kind]
+    () => items.flatMap((it, i) => (it.area && clipToProperty(it.area, boundary) ? [{ ring: it.area, color: colorFor(kind, i), number: i + 1 }] : [])),
+    [items, kind, boundary]
   );
   const highlight = useMemo(() => {
     const i = items.findIndex((it) => it.id === selected);
     const it = items[i];
-    if (!it?.area) return null;
+    if (!it?.area || !clipToProperty(it.area, boundary)) return null;
     return { ring: it.area, color: colorFor(kind, i), label: 'name' in it ? it.name : it.species };
-  }, [items, selected, kind]);
+  }, [items, selected, kind, boundary]);
 
   const build = async () => {
     if (!activePropertyId) return;
@@ -353,7 +356,7 @@ export default function HabitatPlanner({ kind }: { kind: Kind }) {
           <p className="eyebrow mt-5">{copy.eyebrow}</p>
           <h1 className="mt-2 text-2xl font-bold text-ink">{copy.title}</h1>
           <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-ink-soft">
-            {copy.intro} Part of the Conservationist plan, along with weekly checklists and unlimited properties.
+            {copy.intro} Part of the Conservationist plan, along with weekly checklists and up to 10 properties.
           </p>
           <Link href="/upgrade" className="btn-primary mt-6 !text-sm">See plans <Icon.Arrow size={16} /></Link>
         </div>
@@ -463,7 +466,7 @@ export default function HabitatPlanner({ kind }: { kind: Kind }) {
             ) : kind === 'food' ? (
               <>
                 {(items as FoodPlot[]).map((plot, i) => (
-                  <FoodPlotCard key={plot.id} plot={plot} n={i + 1} color={colorOf(i)} active={selected === plot.id} onShow={() => show(plot.id)} />
+                  <FoodPlotCard key={plot.id} plot={plot} n={i + 1} color={colorOf(i)} active={selected === plot.id} onShow={() => show(plot.id)} onMap={!!clipToProperty(plot.area, boundary)} />
                 ))}
                 <SeedShoppingList plots={items as FoodPlot[]} />
               </>
@@ -473,7 +476,7 @@ export default function HabitatPlanner({ kind }: { kind: Kind }) {
                   {(items as NestingBox[]).reduce((a, b) => a + b.count, 0)} boxes in {items.length} {items.length === 1 ? 'group' : 'groups'}.
                 </p>
                 {(items as NestingBox[]).map((box, i) => (
-                  <NestingBoxCard key={box.id} box={box} n={i + 1} color={colorOf(i)} active={selected === box.id} onShow={() => show(box.id)} />
+                  <NestingBoxCard key={box.id} box={box} n={i + 1} color={colorOf(i)} active={selected === box.id} onShow={() => show(box.id)} onMap={!!clipToProperty(box.area, boundary)} />
                 ))}
               </>
             )}

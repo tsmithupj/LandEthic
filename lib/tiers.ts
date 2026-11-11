@@ -8,7 +8,7 @@ export const TIER_PROPERTY_LIMITS: Record<SubscriptionTier, number> = {
   free:            1,
   steward:         1,
   naturalist:      3,
-  conservationist: Infinity,
+  conservationist: 10,
 };
 
 export function isTier(value: unknown): value is SubscriptionTier {

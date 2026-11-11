@@ -7,7 +7,7 @@ import { plans, tasks } from '@/lib/db/schema';
 import { toActionPlan, toPropertyProfile, toTaskInsert } from '@/lib/db/mappers';
 import { getOwnedProperty } from '@/lib/db/ownership';
 import { getUserTier } from '@/lib/tier-server';
-import { enforceAiLimit } from '@/lib/rate-limit';
+import { enforceAiLimit, releaseAiUsage } from '@/lib/rate-limit';
 import { generateMonthlyUpdate } from '@/lib/claude';
 import { fetchSatelliteSnapshot, ringFromPixels } from '@/lib/satellite';
 import {
@@ -109,6 +109,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
   } catch (err) {
     console.error('[monthly-update] AI error:', err instanceof Error ? err.message : err);
+    await releaseAiUsage(userId, 'monthly-update');
     return NextResponse.json(
       { error: 'We could not build your monthly update just now. Please try again in a minute.' },
       { status: 500 },

@@ -11,6 +11,7 @@ import {
 import { useUser } from '@clerk/nextjs';
 import type { PropertyProfile, ActionPlan, ActionTask, Goal, SubscriptionTier, TaskStep } from '@/types';
 import { monthKey, monthNumOf } from '@/lib/months';
+import type { AccessState } from '@/lib/access-rules';
 
 import { TIER_PROPERTY_LIMITS } from '@/lib/tiers';
 
@@ -64,6 +65,9 @@ interface LandEthicStore {
 
   // Subscription tier (from Clerk publicMetadata)
   tier:          SubscriptionTier;
+  /** Free-plan countdown / lock state (null until loaded). */
+  access:        AccessState | null;
+  refreshAccess: () => Promise<void>;
   propertyLimit: number;
   canAddProperty: boolean;
 
@@ -134,6 +138,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+  const [access, setAccess] = useState<AccessState | null>(null);
+
+  // Free-plan countdown / lock state — reloaded whenever the tier changes (e.g. after checkout)
+  const refreshAccess = useCallback(async () => {
+    try {
+      const res = await fetch('/api/account/access');
+      if (res.ok) setAccess(await res.json());
+    } catch {
+      // leave as-is
+    }
+  }, []);
+  useEffect(() => {
+    if (!isLoaded || !userId) { setAccess(null); return; }
+    refreshAccess();
+  }, [isLoaded, userId, tier, refreshAccess]);
 
   // Derived from the active entry
   const activeEntry   = propertyEntries.find((e) => e.property.id === activePropertyId) ?? null;
@@ -342,6 +361,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tier,
           userGoalsText: userGoalsText || undefined,
           boundary: activeEntry?.boundary ?? undefined,
+          propertyId: activePropertyId, // a rebuild — counts against the monthly rebuild allowance
         }),
       });
       if (!planRes.ok) {
@@ -567,7 +587,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         userGoalsText, setUserGoalsText,
         boundary: activeEntry?.boundary ?? boundary, setBoundary,
         property, plan, insights,
-        tier, propertyLimit, canAddProperty,
+        tier, access, refreshAccess, propertyLimit, canAddProperty,
         isAnalyzing, analyzeStage, analyzeError,
         analyzeAndPlan, regeneratePlan, refreshInsights, monthlyUpdate, completeTask, toggleTaskStep, replaceTask,
         switchProperty, removeProperty,

@@ -24,35 +24,45 @@ if (!process.env.STRIPE_SECRET_KEY) {
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-08-26.dahlia' });
 
-const TIERS: { lookupKey: string; envVar: string; name: string; amountCents: number }[] = [
-  { lookupKey: 'landethic_steward_monthly', envVar: 'STRIPE_PRICE_STEWARD', name: 'LandEthic Steward', amountCents: 999 },
-  { lookupKey: 'landethic_naturalist_monthly', envVar: 'STRIPE_PRICE_NATURALIST', name: 'LandEthic Naturalist', amountCents: 1999 },
-  { lookupKey: 'landethic_conservationist_monthly', envVar: 'STRIPE_PRICE_CONSERVATIONIST', name: 'LandEthic Conservationist', amountCents: 3999 },
+// Prices from claude/LandEthic-Pricing-Analysis.md (Nov 2026). Lookup keys end in _2026
+// so they don't collide with the original $9.99/$19.99/$39.99 monthly prices.
+const TIERS: { name: string; envVar: string; key: string; monthlyCents: number; yearlyCents: number }[] = [
+  { name: 'LandEthic Steward',        envVar: 'STRIPE_PRICE_STEWARD',        key: 'steward',        monthlyCents: 399,  yearlyCents: 2999 },
+  { name: 'LandEthic Naturalist',     envVar: 'STRIPE_PRICE_NATURALIST',     key: 'naturalist',     monthlyCents: 699,  yearlyCents: 5999 },
+  { name: 'LandEthic Conservationist', envVar: 'STRIPE_PRICE_CONSERVATIONIST', key: 'conservationist', monthlyCents: 1599, yearlyCents: 11999 },
 ];
+
+async function findOrCreateProduct(name: string) {
+  const existing = await stripe.products.search({ query: `name:'${name}' AND active:'true'`, limit: 1 });
+  return existing.data[0] ?? (await stripe.products.create({ name }));
+}
+
+async function findOrCreatePrice(productId: string, lookupKey: string, cents: number, interval: 'month' | 'year') {
+  const existing = await stripe.prices.list({ lookup_keys: [lookupKey], limit: 1 });
+  if (existing.data[0]) return { price: existing.data[0], created: false };
+  const price = await stripe.prices.create({
+    product: productId,
+    currency: 'usd',
+    unit_amount: cents,
+    recurring: { interval },
+    lookup_key: lookupKey,
+  });
+  return { price, created: true };
+}
 
 async function main() {
   console.log('Setting up Stripe products/prices...\n');
   const results: string[] = [];
 
   for (const tier of TIERS) {
-    const existing = await stripe.prices.list({ lookup_keys: [tier.lookupKey], limit: 1 });
-    let price = existing.data[0];
-
-    if (!price) {
-      const product = await stripe.products.create({ name: tier.name });
-      price = await stripe.prices.create({
-        product: product.id,
-        currency: 'usd',
-        unit_amount: tier.amountCents,
-        recurring: { interval: 'month' },
-        lookup_key: tier.lookupKey,
-      });
-      console.log(`Created ${tier.name}: ${price.id}`);
-    } else {
-      console.log(`Found existing ${tier.name}: ${price.id}`);
+    const product = await findOrCreateProduct(tier.name);
+    for (const interval of ['month', 'year'] as const) {
+      const lookupKey = `landethic_${tier.key}_${interval === 'month' ? 'monthly' : 'yearly'}_2026`;
+      const cents = interval === 'month' ? tier.monthlyCents : tier.yearlyCents;
+      const { price, created } = await findOrCreatePrice(product.id, lookupKey, cents, interval);
+      console.log(`${created ? 'Created' : 'Found existing'} ${tier.name} (${interval}ly): ${price.id}`);
+      results.push(`${tier.envVar}${interval === 'year' ? '_YEARLY' : ''}=${price.id}`);
     }
-
-    results.push(`${tier.envVar}=${price.id}`);
   }
 
   console.log('\nAdd these to .env.local (and to your Vercel project env vars for production):\n');

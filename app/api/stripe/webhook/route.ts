@@ -50,12 +50,15 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
     return;
   }
 
+  // Paid access ended now (or at period end) — the free-plan clock starts from here
+  const endedAt = subscription.ended_at ?? subscription.items.data[0]?.current_period_end;
   await upsertSubscription({
     clerkUserId,
     stripeSubscriptionId: null,
     tier: 'free',
     status: 'canceled',
     cancelAtPeriodEnd: false,
+    ...(endedAt ? { currentPeriodEnd: new Date(endedAt * 1000) } : {}),
   });
 
   await setTier(clerkUserId, 'free');

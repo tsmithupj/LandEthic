@@ -3,7 +3,7 @@ import { SignedIn, SignedOut } from "@clerk/nextjs";
 import AppUserButton from "@/components/AppUserButton";
 import SiteFooter from "@/components/SiteFooter";
 import { ContourLines, Icon, Logo } from "@/components/brand";
-import { PLANS, TRIAL_NOTE } from "@/lib/pricing";
+import { PLANS, TRIAL_NOTE, FREE_PLAN_DAYS, formatPrice, yearlySavingsPercent } from "@/lib/pricing";
 
 const steps = [
   {
@@ -183,10 +183,15 @@ export default function LandingPage() {
                     </span>
                   )}
                   <h3 className="mb-1.5 mt-6 text-[17px] font-bold text-ink">{plan.name}</h3>
-                  <div className="mb-1.5 flex items-baseline gap-1">
-                    <span className="font-display text-[28px] font-bold text-ink">{plan.price}</span>
-                    {plan.period && <span className="text-[13px] text-ink-faint">{plan.period}</span>}
+                  <div className="mb-0.5 flex items-baseline gap-1">
+                    <span className="font-display text-[28px] font-bold text-ink">{formatPrice(plan.yearly)}</span>
+                    <span className="text-[13px] text-ink-faint">{plan.tier === "free" ? `for ${FREE_PLAN_DAYS} days` : "/year"}</span>
                   </div>
+                  <p className="mb-1.5 text-[12px] text-ink-faint">
+                    {plan.tier === "free"
+                      ? "No card needed"
+                      : `or ${formatPrice(plan.monthly)}/month · save ${yearlySavingsPercent(plan)}% yearly`}
+                  </p>
                   <p className="mb-6 text-[13px] text-ink-faint">{plan.tagline}</p>
                   <ul className="mb-7 flex flex-1 flex-col gap-3">
                     {plan.features.map((f) => (
@@ -200,7 +205,7 @@ export default function LandingPage() {
                     href="/onboarding"
                     className={`${highlighted ? "btn-primary" : "btn-outline"} w-full !py-3`}
                   >
-                    {plan.tier === "free" ? "Get started free" : "Start free trial"}
+                    {plan.tier === "free" ? "Get started free" : "Start with a free week"}
                   </Link>
                 </div>
               );

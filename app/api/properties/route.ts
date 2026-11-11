@@ -6,6 +6,7 @@ import { getDb } from '@/lib/db/client';
 import { properties, plans, tasks } from '@/lib/db/schema';
 import { toPropertyEntry, toTaskInsert } from '@/lib/db/mappers';
 import { getUserTier, getPropertyAllowance } from '@/lib/tier-server';
+import { getAccess } from '@/lib/access';
 import type { PropertyEntry } from '@/lib/store';
 import type { PropertyProfile, ActionPlan } from '@/types';
 
@@ -52,7 +53,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'profile and plan are required' }, { status: 400 });
   }
 
-  const allowance = await getPropertyAllowance(userId, await getUserTier());
+  const tier = await getUserTier();
+  if ((await getAccess(userId, tier)).locked) {
+    return NextResponse.json({ error: 'Your free plan has ended. Pick a plan to keep going.', locked: true }, { status: 402 });
+  }
+  const allowance = await getPropertyAllowance(userId, tier);
   if (!allowance.canAdd) {
     return NextResponse.json({ error: 'Property limit reached for your plan' }, { status: 403 });
   }

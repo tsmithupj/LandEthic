@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Map as MapboxMap } from 'mapbox-gl';
 import { Icon } from '@/components/brand';
+import { clipToProperty, shapeCenter, shapePoints } from '@/lib/geo';
 
 interface DashboardMapProps {
   boundary: number[][][] | null;
@@ -75,6 +76,9 @@ export default function DashboardMap({
 
     const hl = highlightRef.current;
     if (!hl || hl.ring.length < 4) return;
+    // Only ever show the part of the spot that is inside the property line
+    const shape = clipToProperty(hl.ring, boundaryRef.current);
+    if (!shape) return;
 
     // Stop the flyover so the camera can settle on the spot
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
@@ -83,7 +87,7 @@ export default function DashboardMap({
 
     map.addSource('highlight', {
       type: 'geojson',
-      data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [hl.ring] }, properties: {} },
+      data: { type: 'Feature', geometry: shape, properties: {} },
     });
     map.addLayer({
       id: 'highlight-fill',
@@ -99,7 +103,7 @@ export default function DashboardMap({
     });
 
     // Frame the spot together with the property so the owner sees where it sits
-    const pts = [...hl.ring, ...(boundaryRef.current?.[0] ?? [])];
+    const pts = [...shapePoints(shape), ...(boundaryRef.current?.[0] ?? [])];
     const lngs = pts.map((c) => c[0]);
     const lats = pts.map((c) => c[1]);
     map.fitBounds(
@@ -117,7 +121,11 @@ export default function DashboardMap({
     if (map.getLayer('features-line')) map.removeLayer('features-line');
     if (map.getSource('features'))     map.removeSource('features');
 
-    const list = (featuresRef.current ?? []).filter((f) => f.ring.length >= 4);
+    // Trim each spot to the property line; drop spots that are really outside it
+    const list = (featuresRef.current ?? []).flatMap((f) => {
+      const shape = clipToProperty(f.ring, boundaryRef.current);
+      return shape ? [{ ...f, shape }] : [];
+    });
     if (!list.length) return;
 
     map.addSource('features', {
@@ -126,7 +134,7 @@ export default function DashboardMap({
         type: 'FeatureCollection',
         features: list.map((f) => ({
           type: 'Feature' as const,
-          geometry: { type: 'Polygon' as const, coordinates: [f.ring] },
+          geometry: f.shape,
           properties: { color: f.color },
         })),
       },
@@ -149,9 +157,7 @@ export default function DashboardMap({
     if (!mapboxgl) return;
     for (const f of list) {
       if (f.number === undefined) continue;
-      const pts = f.ring.slice(0, -1);
-      const lng = pts.reduce((a, c) => a + c[0], 0) / pts.length;
-      const lat = pts.reduce((a, c) => a + c[1], 0) / pts.length;
+      const [lng, lat] = shapeCenter(f.shape);
       const el = document.createElement('div');
       el.textContent = String(f.number);
       el.style.cssText = `width:22px;height:22px;border-radius:9999px;background:${f.color};color:#fff;font:700 12px/22px 'Public Sans',sans-serif;text-align:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)`;

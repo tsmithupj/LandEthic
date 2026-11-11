@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import LegalPage from '@/components/LegalPage';
 import { BUSINESS_NAME, CONTACT_EMAIL } from '@/lib/legal';
+import { DATA_KEEP_DAYS } from '@/lib/pricing';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy — LandEthic.io',
@@ -149,7 +150,8 @@ export default function PrivacyPage() {
             <ul>
               <li>Account, property, and plan information is kept while your account is open.</li>
               <li>If you remove a property, its plan and tasks are deleted with it.</li>
-              <li>AI usage counts are only needed for a day; we may delete them at any time.</li>
+              <li>AI usage counts are only needed for 30 days (to track monthly allowances); we delete older ones.</li>
+              <li>If your free plan or paid plan ends and you do not choose a plan, your account is locked. {DATA_KEEP_DAYS} days after that, we automatically delete your properties, plans, tasks, progress, food plot and nest box plans, and photo identifications. Your sign-in account stays so you can start again.</li>
               <li>When you close your account we delete your account and property data, except for records we must keep by law (for example, billing records that Stripe and tax rules require).</li>
             </ul>
           ),

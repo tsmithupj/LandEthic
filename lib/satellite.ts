@@ -146,7 +146,7 @@ export function ringFromPixels(
 /** Prompt text explaining the photo, shared by every AI call that gets one. */
 export function photoIntro(hasOutline: boolean): string {
   return `SATELLITE PHOTO:
-The attached image is a current satellite photo of this property, ${SATELLITE_SIZE} × ${SATELLITE_SIZE} pixels. North is at the top, east is on the right.${hasOutline ? ' The property line is drawn in yellow. Only describe land inside it.' : ' The exact property line is not known; the property is near the center of the photo.'}
+The attached image is a current satellite photo of this property, ${SATELLITE_SIZE} × ${SATELLITE_SIZE} pixels. North is at the top, east is on the right.${hasOutline ? ' The property line is drawn in yellow. The owner can only work on land INSIDE the yellow line: every finding, task, and spot must be inside it. Woods, fields, water, or buildings outside the line belong to neighbors — you may mention them only as context (e.g. "the woods just past your north line"), never as a place to do work.' : ' The exact property line is not known; the property is near the center of the photo.'}
 Study it closely before writing: find the house and outbuildings, the driveway and road frontage, the tree lines, open fields, fence rows, ponds, creeks, low wet-looking spots, and any bare or eroded areas. Base every location on what you actually see. Do not describe woods, water, or fields that are not in the photo.`;
 }
 
@@ -154,7 +154,7 @@ Study it closely before writing: find the house and outbuildings, the driveway a
 export const AREA_PIXEL_RULES = `RULES FOR "areaPixels" (we draw this outline on the owner's map, so it must sit on the right spot in the photo):
 - Trace the outline of the exact area where the work happens, as 4–12 [x, y] pixel points going around its edge. x is pixels from the LEFT edge of the photo (0–${SATELLITE_SIZE}), y is pixels from the TOP edge (0–${SATELLITE_SIZE}).
 - Follow what you see: the edge of the tree line, the shape of the field, the bank of the pond. For a long strip (fence row, woods edge, creek bank) trace a thin shape along it. For a single spot (a nest box, a brush pile) trace a small shape around where it goes.
-- Keep it inside the yellow property line when one is drawn.
+- When a yellow property line is drawn, EVERY point must be inside it. Never trace neighbors' land, the road, or woods past the line. If the feature you are describing sits on the line (a fence row, a woods edge), trace only the strip on the owner's side. If the right spot for the work is outside the line, choose a different spot inside it.
 - It must match the written location. If the work truly covers the whole property, trace the property line.`;
 
 /** Image block for the Anthropic API. */

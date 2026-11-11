@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import LegalPage from '@/components/LegalPage';
-import { PLANS, TRIAL_NOTE } from '@/lib/pricing';
+import { PLANS, FREE_PLAN_DAYS, DATA_KEEP_DAYS, formatPrice } from '@/lib/pricing';
 import { BUSINESS_NAME, CONTACT_EMAIL, GOVERNING_LAW_STATE } from '@/lib/legal';
 
 export const metadata: Metadata = {
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 const Mail = () => <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>;
 
 const paidPlans = PLANS.filter((p) => p.tier !== 'free')
-  .map((p) => `${p.name} (${p.price}${p.period ?? ''})`)
+  .map((p) => `${p.name} (${formatPrice(p.monthly)} a month or ${formatPrice(p.yearly)} a year)`)
   .join(', ');
 
 export default function TermsPage() {
@@ -53,15 +53,14 @@ export default function TermsPage() {
           body: (
             <>
               <ul>
-                <li><strong>Free plan.</strong> The Free plan costs nothing and does not need a payment card.</li>
-                <li><strong>Paid plans.</strong> Our paid plans are {paidPlans}, billed monthly in U.S. dollars through our payment processor, Stripe. Prices do not include any taxes that may apply.</li>
-                <li><strong>Free trial.</strong> {TRIAL_NOTE} The trial applies to your first paid subscription. If you do not cancel before the trial ends, your card will be charged and the subscription renews every month.</li>
-                <li><strong>Automatic renewal.</strong> Paid plans renew automatically each month until you cancel.</li>
+                <li><strong>Free plan.</strong> Every new account gets a free plan for {FREE_PLAN_DAYS} days. It costs nothing and does not need a payment card. When the {FREE_PLAN_DAYS} days are up, your account is locked until you choose a paid plan. If you do not choose one within {DATA_KEEP_DAYS} days after that, we delete your properties, plans, progress, and photo identifications (see our <Link href="/privacy">Privacy Policy</Link>).</li>
+                <li><strong>Paid plans.</strong> Our paid plans are {paidPlans}, billed in U.S. dollars through our payment processor, Stripe. Prices do not include any taxes that may apply.</li>
+                <li><strong>Automatic renewal.</strong> Paid plans renew automatically each month or each year, depending on what you chose, until you cancel.</li>
                 <li><strong>Switching plans.</strong> Moving between paid plans takes effect right away, and Stripe adjusts the charge for the rest of the billing period (proration).</li>
-                <li><strong>Cancelling.</strong> You can cancel or downgrade to Free any time from <Link href="/upgrade">Manage plan</Link>. You keep your paid features until the end of the period you already paid for. Your land data stays in your account.</li>
-                <li><strong>Refunds.</strong> Except where the law requires otherwise, payments are not refundable and we do not give credits for partial months.</li>
+                <li><strong>Cancelling.</strong> You can cancel any time from <Link href="/upgrade">Manage plan</Link>. You keep your paid features until the end of the period you already paid for. After that your account is locked, and if you do not pick a plan again within {DATA_KEEP_DAYS} days we delete your land data.</li>
+                <li><strong>Refunds.</strong> Except where the law requires otherwise, payments are not refundable and we do not give credits for partial months or years.</li>
                 <li><strong>Price changes.</strong> If we change prices, we will tell you in advance. The new price applies from your next billing period after the notice.</li>
-                <li><strong>Fair-use limits.</strong> AI features (such as building plans, asking task questions, and identifying species) have daily limits that depend on your plan. If you reach a limit, you can try again the next day.</li>
+                <li><strong>Monthly allowances.</strong> AI features (such as building or rebuilding plans, asking task questions, and identifying species) have monthly allowances that depend on your plan. Each use counts for 30 days. If you reach an allowance, the app tells you when your next one opens up.</li>
               </ul>
               <p>
                 Plan features are described on our <Link href="/#pricing">pricing page</Link>. We may improve or change

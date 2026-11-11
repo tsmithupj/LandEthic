@@ -7,7 +7,7 @@ import { habitatPlans } from '@/lib/db/schema';
 import { toHabitatPlan, toPropertyProfile } from '@/lib/db/mappers';
 import { getOwnedProperty } from '@/lib/db/ownership';
 import { getUserTier } from '@/lib/tier-server';
-import { enforceAiLimit } from '@/lib/rate-limit';
+import { enforceAiLimit, releaseAiUsage } from '@/lib/rate-limit';
 import { generateHabitatPlan } from '@/lib/claude';
 import { fetchSatelliteSnapshot, ringFromPixels } from '@/lib/satellite';
 import type { FoodPlot, NestingBox } from '@/types';
@@ -70,6 +70,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
   } catch (err) {
     console.error('[habitat] AI error:', err instanceof Error ? err.message : err);
+    await releaseAiUsage(userId, 'habitat-plan');
     return NextResponse.json(
       { error: 'We could not build your plan just now. Please try again in a minute.' },
       { status: 500 },

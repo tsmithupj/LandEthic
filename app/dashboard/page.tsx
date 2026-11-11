@@ -7,10 +7,12 @@ import { useState, useEffect, useMemo, useRef, Suspense, type ComponentType } fr
 import { useUser } from '@clerk/nextjs';
 import { useStore } from '@/lib/store';
 import type { ActionTask } from '@/types';
-import { TIER_LABELS } from '@/lib/pricing';
+import { TIER_LABELS, formatPrice, planFor } from '@/lib/pricing';
 import { TIER_ORDER } from '@/lib/tiers';
+import { clipToProperty } from '@/lib/geo';
 import WaitScreen from '@/components/WaitScreen';
 import MonthlyUpdate from '@/components/MonthlyUpdate';
+import { FreePlanBanner, LockedScreen } from '@/components/FreePlan';
 import WeeklyChecklist from '@/components/WeeklyChecklist';
 import AppUserButton from '@/components/AppUserButton';
 import AppHeader, { TierTag } from '@/components/AppHeader';
@@ -381,7 +383,7 @@ function DashboardPageContent() {
   const {
     property, plan, insights, boundary, address,
     propertyEntries, activePropertyId, switchProperty,
-    tier, canAddProperty, reset,
+    tier, access, canAddProperty, reset,
     userGoalsText, setUserGoalsText, regeneratePlan, refreshInsights, isAnalyzing, analyzeStage, analyzeError,
   } = useStore();
   const [editingGoals, setEditingGoals] = useState(false);
@@ -396,14 +398,14 @@ function DashboardPageContent() {
   // Memoized so the map only re-frames when the selected spot actually changes
   const mapHighlight = useMemo(
     () =>
-      activeInsight?.area && activeInsight.area.length >= 4
+      activeInsight?.area && clipToProperty(activeInsight.area, boundary)
         ? {
             ring: activeInsight.area,
             color: (INSIGHT_STYLE[activeInsight.type] ?? INSIGHT_STYLE.opportunity).map,
             label: activeInsight.zoneLabel ?? activeInsight.title,
           }
         : null,
-    [activeInsight]
+    [activeInsight, boundary]
   );
 
   const showInsightOnMap = (i: number) => {
@@ -427,11 +429,22 @@ function DashboardPageContent() {
   const showSwitcher = (tier === 'naturalist' || tier === 'conservationist') && propertyEntries.length > 0;
   const tierLabel = TIER_LABELS[tier];
 
+  // Free plan (or a cancelled plan) has ended — everything is saved but locked
+  if (access?.locked) return (
+    <div className="min-h-screen bg-cream-2">
+      <AppHeader>
+        <AppUserButton />
+      </AppHeader>
+      <LockedScreen />
+    </div>
+  );
+
   if (!property) return (
     <div className="min-h-screen bg-cream-2">
       <AppHeader>
         <AppUserButton />
       </AppHeader>
+      <div className="mx-auto max-w-3xl px-4 pt-6"><FreePlanBanner /></div>
       <NoProperty />
     </div>
   );
@@ -455,14 +468,12 @@ function DashboardPageContent() {
       >
         <Icon.Refresh size={15} /> Refresh plan
       </button>
-      {tier !== 'free' && (
-        <Link
-          href="/dashboard/species"
-          className="inline-flex flex-shrink-0 items-center gap-1.5 text-xs font-semibold text-forest-700 transition-colors hover:text-forest-800"
-        >
-          <Icon.Camera size={15} /> Species ID
-        </Link>
-      )}
+      <Link
+        href="/dashboard/species"
+        className="inline-flex flex-shrink-0 items-center gap-1.5 text-xs font-semibold text-forest-700 transition-colors hover:text-forest-800"
+      >
+        <Icon.Camera size={15} /> Species ID
+      </Link>
       {canAddProperty && (
         <button
           onClick={startNewProperty}
@@ -531,6 +542,9 @@ function DashboardPageContent() {
             {analyzeError}
           </div>
         )}
+
+        {/* Free plan countdown — every visit */}
+        <FreePlanBanner />
 
         {/* Monthly update — Naturalist / Conservationist */}
         <MonthlyUpdate />
@@ -634,7 +648,7 @@ function DashboardPageContent() {
             <p className="eyebrow">Property insights</p>
             <p className="mb-4 mt-1 text-xs text-ink-soft">
               What we found on your land, exactly where it is, and what to do about it.
-              {insights.some((ins) => ins.area) && ' Tap "Show on map" to see the spot outlined above.'}
+              {insights.some((ins) => clipToProperty(ins.area, boundary)) && ' Tap "Show on map" to see the spot outlined above.'}
             </p>
             {!insights.some((ins) => ins.where && ins.area) && (
               <div className="mb-4 flex flex-col gap-3 rounded-xl border border-paper-line bg-cream-2 p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -661,7 +675,7 @@ function DashboardPageContent() {
                 const InsightIcon = style.Icon;
                 const steps = (insight.steps ?? []).filter(Boolean);
                 const isActive = activeInsightIndex === i;
-                const canShow = !!insight.area && insight.area.length >= 4;
+                const canShow = !!clipToProperty(insight.area, boundary);
                 return (
                   <div
                     key={i}
@@ -793,8 +807,8 @@ function DashboardPageContent() {
                 </p>
                 <p className="mt-1 text-sm leading-relaxed text-rust-700">
                   {tier === 'free'
-                    ? 'Upgrade to Steward for $9.99/mo — a full year of tasks season by season, species ID from your photos, and task swapping.'
-                    : 'Upgrade to Naturalist for $19.99/mo — a month-by-month task calendar, see how each task moves your land health, and up to 3 properties.'}
+                    ? `Steward is ${formatPrice(planFor('steward').yearly)}/year — a full year of tasks season by season, 20 plant and animal IDs a month, and a plan rebuild every month.`
+                    : `Naturalist is ${formatPrice(planFor('naturalist').yearly)}/year — a month-by-month task calendar, fresh tasks every month, and up to 3 properties.`}
                 </p>
               </div>
               <span className="flex-shrink-0 text-rust-700"><Icon.Arrow size={22} /></span>
@@ -810,8 +824,8 @@ function DashboardPageContent() {
               <div>
                 <p className="font-display text-base font-bold text-rust-700">Plan food plots and nest boxes</p>
                 <p className="mt-1 text-sm leading-relaxed text-rust-700">
-                  Upgrade to Conservationist for $39.99/mo — a food plot planner with seed picks and rates, a nesting box
-                  planner, weekly checklists, and unlimited properties.
+                  Conservationist is {formatPrice(planFor('conservationist').yearly)}/year — a food plot planner with seed picks and
+                  rates, a nesting box planner, weekly checklists, and up to 10 properties.
                 </p>
               </div>
               <span className="flex-shrink-0 text-rust-700"><Icon.Arrow size={22} /></span>

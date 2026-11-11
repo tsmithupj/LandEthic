@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { getStripe, priceIdForTier, PAID_TIERS, type PaidTier } from '@/lib/stripe';
+import { getStripe, isInterval, planForPriceId, priceIdForTier, PAID_TIERS, type BillingInterval, type PaidTier } from '@/lib/stripe';
 import { getSubscriptionByClerkId, upsertSubscription } from '@/lib/db/subscriptions';
 
 export async function GET() {
@@ -16,6 +16,7 @@ export async function GET() {
     status: row.status,
     cancelAtPeriodEnd: row.cancelAtPeriodEnd,
     currentPeriodEnd: row.currentPeriodEnd,
+    interval: row.stripePriceId ? planForPriceId(row.stripePriceId)?.interval ?? null : null,
   });
 }
 
@@ -23,7 +24,7 @@ export async function PATCH(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const body = (await req.json()) as { tier: PaidTier };
+  const body = (await req.json()) as { tier: PaidTier; interval?: BillingInterval };
   if (!PAID_TIERS.includes(body.tier)) {
     return NextResponse.json({ error: 'Invalid tier' }, { status: 400 });
   }
@@ -36,9 +37,14 @@ export async function PATCH(req: NextRequest) {
   const stripe = getStripe();
   const subscription = await stripe.subscriptions.retrieve(row.stripeSubscriptionId);
   const currentItem = subscription.items.data[0];
+  // Keep the member's billing interval unless they asked to change it
+  const interval: BillingInterval = isInterval(body.interval)
+    ? body.interval
+    : planForPriceId(currentItem.price.id)?.interval ?? 'month';
+  const priceId = priceIdForTier(body.tier, interval);
 
   await stripe.subscriptions.update(row.stripeSubscriptionId, {
-    items: [{ id: currentItem.id, price: priceIdForTier(body.tier) }],
+    items: [{ id: currentItem.id, price: priceId }],
     proration_behavior: 'create_prorations',
     cancel_at_period_end: false,
   });
@@ -46,7 +52,7 @@ export async function PATCH(req: NextRequest) {
   await upsertSubscription({
     clerkUserId: userId,
     tier: body.tier,
-    stripePriceId: priceIdForTier(body.tier),
+    stripePriceId: priceId,
     cancelAtPeriodEnd: false,
   });
 

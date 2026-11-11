@@ -9,6 +9,8 @@ import { readImageForUpload } from '@/lib/image';
 import type { ActionTask } from '@/types';
 import AppHeader from '@/components/AppHeader';
 import { StepList } from '@/components/WeeklyChecklist';
+import { clipToProperty } from '@/lib/geo';
+import { useRedirectWhenLocked } from '@/components/FreePlan';
 import { Icon, Spinner } from '@/components/brand';
 
 const DashboardMap = dynamic(() => import('@/components/DashboardMap'), { ssr: false });
@@ -57,6 +59,7 @@ export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { plan, property, boundary, address, tier, completeTask, replaceTask, userGoalsText } = useStore();
+  useRedirectWhenLocked();
   const [replacing, setReplacing] = useState(false);
   const [replaceError, setReplaceError] = useState<string | null>(null);
   const [idPreview, setIdPreview] = useState<string | null>(null);
@@ -77,8 +80,8 @@ export default function TaskDetailPage() {
   // only re-frames when the task's area actually changes)
   const taskArea = task?.area;
   const workArea = useMemo(
-    () => (taskArea && taskArea.length >= 4 ? { ring: taskArea, color: '#FF8A3D', label: 'Work area' } : null),
-    [taskArea]
+    () => (taskArea && clipToProperty(taskArea, boundary) ? { ring: taskArea, color: '#FF8A3D', label: 'Work area' } : null),
+    [taskArea, boundary]
   );
 
   if (!task) {

@@ -5,6 +5,7 @@ import { useRef, useState, useEffect, type ComponentType } from 'react';
 import { useStore } from '@/lib/store';
 import { readImageForUpload } from '@/lib/image';
 import AppHeader from '@/components/AppHeader';
+import { useRedirectWhenLocked } from '@/components/FreePlan';
 import { Icon, Seal, Spinner } from '@/components/brand';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -495,6 +496,7 @@ function boundaryCenter(boundary: number[][][] | null): { lat: number; lng: numb
 
 export default function SpeciesPage() {
   const { property, boundary, tier } = useStore();
+  useRedirectWhenLocked();
 
   const coords =
     (property as { coordinates?: { lat: number; lng: number } } | null)?.coordinates ??
@@ -506,7 +508,6 @@ export default function SpeciesPage() {
   const [historyLoading, setHistoryLoading] = useState(true);
 
   useEffect(() => {
-    if (tier === 'free') { setHistoryLoading(false); return; }
     fetch('/api/species-ids')
       .then((r) => (r.ok ? r.json() : { items: [] }))
       .then((d: { items?: SavedSpeciesId[] }) => setHistory(d.items ?? []))
@@ -532,16 +533,15 @@ export default function SpeciesPage() {
           </p>
         </div>
 
-        {tier === 'free' ? (
-          <div className="card p-6 text-center">
-            <div className="mb-4"><Seal size={56}><Icon.Lock size={22} /></Seal></div>
-            <p className="font-display text-lg font-bold text-ink">Species ID is on the Steward plan</p>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-ink-soft">
-              Upgrade to identify plants and animals from your own photos.
+        {tier === 'free' && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-forest-200 bg-forest-50 px-4 py-3">
+            <p className="text-xs leading-relaxed text-forest-800">
+              Your free plan includes <strong>3 photo IDs</strong> to try it out. Steward gives you 20 a month.
             </p>
-            <Link href="/upgrade" className="btn-primary mt-5 !text-sm">See plans <Icon.Arrow size={16} /></Link>
+            <Link href="/upgrade" className="flex-shrink-0 text-xs font-semibold text-forest-700 hover:underline">See plans</Link>
           </div>
-        ) : (
+        )}
+        {(
           <>
             <IdentifyPanel
               lat={lat}

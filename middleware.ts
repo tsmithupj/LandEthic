@@ -5,6 +5,7 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 // explicitly listed here (e.g. the Stripe webhook, verified by signature instead).
 const isPublicRoute = createRouteMatcher([
   '/api/stripe/webhook(.*)',
+  '/api/cron(.*)', // Vercel Cron — checked against CRON_SECRET inside the route
 ]);
 
 // Non-API page routes that require a signed-in user

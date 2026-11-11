@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { auth } from '@clerk/nextjs/server';
 import { getUserTier } from '@/lib/tier-server';
-import { enforceAiLimit } from '@/lib/rate-limit';
+import { enforceAiLimit, releaseAiUsage } from '@/lib/rate-limit';
 import { saveSpeciesId } from '@/lib/db/species-ids';
 
 export const maxDuration = 60;
@@ -32,10 +32,8 @@ interface SpeciesResult {
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // Free gets a few IDs to try it; the monthly allowance in lib/rate-limit.ts decides.
   const tier = await getUserTier();
-  if (tier === 'free') {
-    return NextResponse.json({ error: 'Species ID is available on the Steward plan and above.' }, { status: 403 });
-  }
 
   const body = await req.json() as {
     imageBase64: string;   // base64-encoded image (without data: prefix)
@@ -70,6 +68,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ results, saved: await save(results) });
   } catch (err) {
     console.error('[identify-species] Claude vision error:', err);
+    await releaseAiUsage(userId, 'identify-species');
     return NextResponse.json({ error: 'Species identification failed. Please try another photo.' }, { status: 502 });
   }
 }

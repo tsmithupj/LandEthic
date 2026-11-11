@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { useStore } from "@/lib/store";
-import { PLANS, TIER_LABELS } from "@/lib/pricing";
+import { PLANS, TIER_LABELS, FREE_PLAN_DAYS, DATA_KEEP_DAYS, formatPrice, yearlySavingsPercent, type BillingInterval } from "@/lib/pricing";
 import type { SubscriptionTier } from "@/types";
 import AppHeader from "@/components/AppHeader";
 import { ContourLines, Icon, Spinner } from "@/components/brand";
@@ -13,6 +13,7 @@ interface BillingStatus {
   status: string | null;
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: string | null;
+  interval?: BillingInterval | null;
 }
 
 function formatDate(iso: string): string {
@@ -30,6 +31,13 @@ function UpgradePageContent() {
   const [resuming, setResuming] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [interval, setBillingInterval] = useState<BillingInterval>("year");
+  const currentInterval: BillingInterval | null = currentTier === "free" ? null : billingStatus?.interval ?? null;
+
+  // Show the member's own billing interval first
+  useEffect(() => {
+    if (billingStatus?.interval) setBillingInterval(billingStatus.interval);
+  }, [billingStatus?.interval]);
 
   const refreshBillingStatus = useCallback(async () => {
     try {
@@ -59,15 +67,18 @@ function UpgradePageContent() {
     }
   }, [searchParams, user, router, refreshBillingStatus]);
 
+  const isCurrentChoice = (tierId: SubscriptionTier) =>
+    tierId === currentTier && (tierId === "free" || !currentInterval || currentInterval === interval);
+
   const handleSelect = async (tierId: SubscriptionTier) => {
-    if (tierId === currentTier && !(tierId === "free" && billingStatus?.cancelAtPeriodEnd)) return;
+    if (isCurrentChoice(tierId)) return;
     setLoading(tierId);
     setError(null);
     try {
       if (tierId === "free") {
         const periodEnd = billingStatus?.currentPeriodEnd ? formatDate(billingStatus.currentPeriodEnd) : "the end of your billing period";
         const confirmed = window.confirm(
-          `Your plan will switch to Free on ${periodEnd}. You'll keep your ${TIER_LABELS[currentTier]} features until then. Continue?`
+          `Your ${TIER_LABELS[currentTier]} plan will end on ${periodEnd}. After that your account is locked, and your land data is deleted ${DATA_KEEP_DAYS} days later unless you pick a plan again. Cancel your plan?`
         );
         if (!confirmed) {
           setLoading(null);
@@ -80,7 +91,7 @@ function UpgradePageContent() {
         const res = await fetch("/api/stripe/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tier: tierId }),
+          body: JSON.stringify({ tier: tierId, interval }),
         });
         if (!res.ok) throw new Error("Failed to start checkout");
         const data = await res.json();
@@ -90,7 +101,7 @@ function UpgradePageContent() {
         const res = await fetch("/api/stripe/subscription", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tier: tierId }),
+          body: JSON.stringify({ tier: tierId, interval }),
         });
         if (!res.ok) throw new Error("Failed to switch plan");
         await user?.reload();
@@ -147,8 +158,8 @@ function UpgradePageContent() {
           </span>
           <h1 className="mb-3 mt-5 text-3xl font-bold text-ink sm:text-4xl">Manage your plan</h1>
           <p className="mx-auto max-w-lg text-sm leading-relaxed text-ink-soft">
-            Switching between paid plans applies right away with a prorated charge. Downgrading to Free takes
-            effect at the end of your current billing period, and your land data always carries over.
+            Switching between paid plans applies right away with a prorated charge. If you cancel, you keep your plan
+            until the end of the period you paid for.
           </p>
           {currentTier !== "free" && (
             <button
@@ -166,8 +177,9 @@ function UpgradePageContent() {
         {billingStatus?.cancelAtPeriodEnd && (
           <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-r-xl border border-l-[3px] border-paper-line border-l-rust-600 bg-rust-100 p-4">
             <p className="text-sm text-rust-700">
-              Your plan downgrades to <strong>Free</strong>
-              {billingStatus.currentPeriodEnd ? ` on ${formatDate(billingStatus.currentPeriodEnd)}` : ""}.
+              Your plan ends
+              {billingStatus.currentPeriodEnd ? ` on ${formatDate(billingStatus.currentPeriodEnd)}` : " soon"}. After that
+              your account is locked.
             </p>
             <button
               onClick={handleResume}
@@ -183,9 +195,28 @@ function UpgradePageContent() {
           <p className="mb-6 rounded-xl border border-rust-600/40 bg-rust-100 px-4 py-3 text-center text-sm text-rust-700">{error}</p>
         )}
 
+        {/* Monthly / yearly */}
+        <div className="mb-7 flex justify-center">
+          <div className="inline-flex rounded-full border border-paper-line bg-cream p-1" role="tablist" aria-label="Billing">
+            {(["year", "month"] as const).map((i) => (
+              <button
+                key={i}
+                role="tab"
+                aria-selected={interval === i}
+                onClick={() => setBillingInterval(i)}
+                className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
+                  interval === i ? "bg-forest-700 text-cream" : "text-ink-soft hover:text-ink"
+                }`}
+              >
+                {i === "year" ? "Yearly · save up to 37%" : "Monthly"}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {PLANS.map((plan) => {
-            const isCurrent = plan.tier === currentTier;
+            const isCurrent = isCurrentChoice(plan.tier);
             const isLoading = loading === plan.tier;
             const isEndingHere = isCurrent && plan.tier !== "free" && billingStatus?.cancelAtPeriodEnd;
             const downgradeAlreadyScheduled = plan.tier === "free" && !isCurrent && billingStatus?.cancelAtPeriodEnd;
@@ -214,10 +245,21 @@ function UpgradePageContent() {
                 ) : null}
 
                 <h2 className="mb-1.5 mt-5 text-[17px] font-bold text-ink">{plan.name}</h2>
-                <div className="mb-1.5 flex items-baseline gap-1">
-                  <span className="font-display text-[28px] font-bold text-ink">{plan.price}</span>
-                  {plan.period && <span className="text-[13px] text-ink-faint">{plan.period}</span>}
+                <div className="mb-0.5 flex items-baseline gap-1">
+                  <span className="font-display text-[28px] font-bold text-ink">
+                    {formatPrice(interval === "year" ? plan.yearly : plan.monthly)}
+                  </span>
+                  <span className="text-[13px] text-ink-faint">
+                    {plan.tier === "free" ? `for ${FREE_PLAN_DAYS} days` : interval === "year" ? "/year" : "/month"}
+                  </span>
                 </div>
+                <p className="mb-1.5 min-h-[18px] text-[12px] font-medium text-forest-700">
+                  {plan.tier === "free"
+                    ? ""
+                    : interval === "year"
+                    ? `Just ${formatPrice(plan.yearly / 12)}/month · save ${yearlySavingsPercent(plan)}%`
+                    : `or ${formatPrice(plan.yearly)}/year`}
+                </p>
                 <p className="mb-5 text-[13px] text-ink-faint">{plan.tagline}</p>
 
                 <ul className="mb-6 flex flex-1 flex-col gap-3">
@@ -247,11 +289,13 @@ function UpgradePageContent() {
                   ) : isCurrent ? (
                     "Current plan"
                   ) : downgradeAlreadyScheduled ? (
-                    "Downgrade scheduled"
+                    "Cancellation scheduled"
                   ) : plan.tier === "free" ? (
-                    "Downgrade to Free"
+                    "Cancel my plan"
                   ) : currentTier === "free" ? (
-                    "Start free trial"
+                    `Choose ${plan.name}`
+                  ) : plan.tier === currentTier ? (
+                    `Switch to ${interval === "year" ? "yearly" : "monthly"}`
                   ) : (
                     `Switch to ${plan.name}`
                   )}
@@ -262,7 +306,7 @@ function UpgradePageContent() {
         </div>
 
         <p className="mt-7 text-center text-[12.5px] text-ink-faint">
-          All paid plans include a 14-day free trial on first subscribe. Cancel anytime.
+          Pay by card, Apple Pay, or Google Pay. Cancel anytime.
         </p>
       </div>
     </div>

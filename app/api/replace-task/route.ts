@@ -4,7 +4,7 @@ import type { ActionTask, PropertyProfile, SubscriptionTier } from '@/types';
 import { GOAL_LABELS } from '@/types';
 import { auth } from '@clerk/nextjs/server';
 import { getUserTier } from '@/lib/tier-server';
-import { enforceAiLimit } from '@/lib/rate-limit';
+import { enforceAiLimit, releaseAiUsage } from '@/lib/rate-limit';
 import { cleanSteps, cleanWeek } from '@/lib/db/mappers';
 import { fetchSatelliteSnapshot, ringFromPixels, photoIntro, photoBlock, AREA_PIXEL_RULES } from '@/lib/satellite';
 
@@ -137,6 +137,7 @@ ${AREA_PIXEL_RULES}` : ''}`;
     return NextResponse.json({ task: newTask });
   } catch (err) {
     console.error('[replace-task] error:', err);
+    await releaseAiUsage(userId, 'replace-task');
     return NextResponse.json({ error: 'We could not suggest a new task just now. Please try again in a minute.' }, { status: 500 });
   }
 }

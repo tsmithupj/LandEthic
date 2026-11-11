@@ -4,15 +4,16 @@ import type { ActionTask, PropertyProfile } from '@/types';
 import { GOAL_LABELS } from '@/types';
 import { auth } from '@clerk/nextjs/server';
 import { getUserTier } from '@/lib/tier-server';
-import { enforceAiLimit } from '@/lib/rate-limit';
+import { enforceAiLimit, releaseAiUsage } from '@/lib/rate-limit';
 
 export const maxDuration = 60;
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Keep each chat request bounded: only the most recent turns, each trimmed.
-const MAX_TURNS = 20;
-const MAX_CHARS_PER_TURN = 2000;
+// (Pricing analysis: worst case ~$0.02 per question instead of ~$0.05.)
+const MAX_TURNS = 8;
+const MAX_CHARS_PER_TURN = 1200;
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -75,7 +76,7 @@ RULES:
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: 700,
       system,
       messages,
     });
@@ -83,6 +84,7 @@ RULES:
     const reply = response.content[0].type === 'text' ? response.content[0].text : '';
     return NextResponse.json({ reply });
   } catch (err) {
+    await releaseAiUsage(userId, 'task-chat');
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[task-chat] error:', msg);
     return NextResponse.json({ error: 'Sorry, we could not answer just now. Please try again in a minute.' }, { status: 500 });

@@ -18,21 +18,38 @@ export function getStripe() {
   return _stripe;
 }
 
-const TIER_PRICE_ENV: Record<PaidTier, string | undefined> = {
-  steward: process.env.STRIPE_PRICE_STEWARD,
-  naturalist: process.env.STRIPE_PRICE_NATURALIST,
-  conservationist: process.env.STRIPE_PRICE_CONSERVATIONIST,
+export type BillingInterval = 'month' | 'year';
+
+// Monthly prices keep their original env var names; yearly prices add _YEARLY.
+const PRICE_ENV: Record<PaidTier, Record<BillingInterval, string | undefined>> = {
+  steward:         { month: process.env.STRIPE_PRICE_STEWARD,         year: process.env.STRIPE_PRICE_STEWARD_YEARLY },
+  naturalist:      { month: process.env.STRIPE_PRICE_NATURALIST,      year: process.env.STRIPE_PRICE_NATURALIST_YEARLY },
+  conservationist: { month: process.env.STRIPE_PRICE_CONSERVATIONIST, year: process.env.STRIPE_PRICE_CONSERVATIONIST_YEARLY },
 };
 
-export function priceIdForTier(tier: PaidTier): string {
-  const priceId = TIER_PRICE_ENV[tier];
-  if (!priceId) throw new Error(`Missing price id env var for tier "${tier}" — run "npm run stripe:setup"`);
+export function isInterval(value: unknown): value is BillingInterval {
+  return value === 'month' || value === 'year';
+}
+
+export function priceIdForTier(tier: PaidTier, interval: BillingInterval = 'month'): string {
+  const priceId = PRICE_ENV[tier][interval];
+  if (!priceId) {
+    const envVar = `STRIPE_PRICE_${tier.toUpperCase()}${interval === 'year' ? '_YEARLY' : ''}`;
+    throw new Error(`Missing Stripe price id — set ${envVar}`);
+  }
   return priceId;
 }
 
-export function tierForPriceId(priceId: string): SubscriptionTier | null {
+/** Which tier (and billing interval) a Stripe price id belongs to. */
+export function planForPriceId(priceId: string): { tier: PaidTier; interval: BillingInterval } | null {
   for (const tier of PAID_TIERS) {
-    if (TIER_PRICE_ENV[tier] === priceId) return tier;
+    for (const interval of ['month', 'year'] as const) {
+      if (PRICE_ENV[tier][interval] === priceId) return { tier, interval };
+    }
   }
   return null;
+}
+
+export function tierForPriceId(priceId: string): SubscriptionTier | null {
+  return planForPriceId(priceId)?.tier ?? null;
 }

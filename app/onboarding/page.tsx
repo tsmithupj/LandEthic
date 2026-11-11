@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ComponentType, type ReactNode } from 'react';
+import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/lib/store';
 import DrawablePropertyMap from '@/components/DrawablePropertyMap';
@@ -380,7 +380,7 @@ function PropertyLimitWall({ tier }: { tier: keyof typeof TIER_LABELS }) {
   const upgradeTarget = tier === 'naturalist' ? 'Conservationist' : 'Naturalist';
   const upgradeDetail =
     tier === 'naturalist'
-      ? 'Conservationist gives you unlimited properties on one account.'
+      ? 'Conservationist lets you manage up to 10 properties on one account.'
       : 'Naturalist lets you manage up to 3 properties on one account.';
 
   return (
@@ -389,7 +389,7 @@ function PropertyLimitWall({ tier }: { tier: keyof typeof TIER_LABELS }) {
       <h2 className="mb-2 text-xl font-bold text-ink">You are at your property limit</h2>
       <p className="mb-2 text-sm leading-relaxed text-ink-soft">
         Your {TIER_LABELS[tier]} plan supports{' '}
-        {tier === 'free' || tier === 'steward' ? '1 property' : '3 properties'}.{' '}
+        {tier === 'free' || tier === 'steward' ? '1 property' : tier === 'naturalist' ? '3 properties' : '10 properties'}.{' '}
         {upgradeDetail}
       </p>
       <p className="mb-6 text-xs text-ink-faint">
@@ -414,8 +414,13 @@ export default function OnboardingPage() {
   const {
     address, acreage,
     analyzeAndPlan, analyzeError, isAnalyzing, analyzeStage,
-    tier, canAddProperty,
+    tier, canAddProperty, access,
   } = useStore();
+
+  // Free plan (or a cancelled plan) has ended — adding a property needs a plan first
+  useEffect(() => {
+    if (access?.locked) router.replace('/upgrade');
+  }, [access?.locked, router]);
 
   const [step, setStep] = useState(0);
   const [parcelLoading, setParcelLoading] = useState(false);

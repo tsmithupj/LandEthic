@@ -4,7 +4,7 @@ import { auth } from '@clerk/nextjs/server';
 import { analyzeProperty } from '@/lib/claude';
 import { getUserTier, getPropertyAllowance } from '@/lib/tier-server';
 import { getOwnedProperty } from '@/lib/db/ownership';
-import { enforceAiLimit } from '@/lib/rate-limit';
+import { enforceAiLimit, releaseAiUsage, type AiRoute } from '@/lib/rate-limit';
 import { fetchSatelliteSnapshot, ringFromPixels } from '@/lib/satellite';
 
 export const maxDuration = 120;
@@ -62,6 +62,7 @@ async function getSoilData(lat: number, lng: number): Promise<string | null> {
 
 // ─── Main route ───────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  let charged: { userId: string; route: AiRoute } | null = null;
   try {
     const body: AnalyzePropertyRequest & { boundary?: number[][][]; refreshPropertyId?: string } = await req.json();
 
@@ -88,8 +89,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const limited = await enforceAiLimit(userId, 'analyze-property', tier);
+    // A new property and an insight update for an existing one have separate monthly allowances
+    const route: AiRoute = body.refreshPropertyId ? 'refresh-insights' : 'analyze-property';
+    const limited = await enforceAiLimit(userId, route, tier);
     if (limited) return limited;
+    charged = { userId, route };
 
     // Parse county/state from address (best-effort)
     const parts  = body.address.split(',').map((s) => s.trim());
@@ -140,6 +144,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[analyze-property]', msg);
+    if (charged) await releaseAiUsage(charged.userId, charged.route);
     return NextResponse.json(
       { error: 'We could not analyze this property just now. Please try again in a minute.' },
       { status: 500 }
