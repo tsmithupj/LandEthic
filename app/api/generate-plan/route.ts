@@ -6,6 +6,8 @@ import { getUserTier } from '@/lib/tier-server';
 import { enforceAiLimit, releaseAiUsage, type AiRoute } from '@/lib/rate-limit';
 import { getOwnedProperty } from '@/lib/db/ownership';
 import { fetchSatelliteSnapshot, ringFromPixels } from '@/lib/satellite';
+import { replacePlan } from '@/lib/db/plans';
+import { keepAliveJson } from '@/lib/keep-alive';
 
 // Plan generation can produce up to ~16k tokens — give the function room to finish.
 export const maxDuration = 300;
@@ -43,28 +45,47 @@ export async function POST(req: NextRequest) {
     const limited = await enforceAiLimit(userId, route, tier);
     if (limited) return limited;
     charged = { userId, route };
+    const rebuildOf = body.propertyId ?? null;
+    const profile = body.profile;
 
-    // Satellite photo of the parcel so each task can point to a real spot
-    const hasBoundary = (body.boundary?.[0]?.length ?? 0) >= 3;
-    const satellite = hasBoundary ? await fetchSatelliteSnapshot(body.boundary) : null;
+    // The AI part takes minutes: keep the connection alive while it works, and for a
+    // rebuild save the new plan here — so it's kept even if the visitor's phone
+    // sleeps or their connection drops before the answer arrives.
+    const work = (async () => {
+      try {
+        // Satellite photo of the parcel so each task can point to a real spot
+        const hasBoundary = (body.boundary?.[0]?.length ?? 0) >= 3;
+        const satellite = hasBoundary ? await fetchSatelliteSnapshot(body.boundary) : null;
 
-    const plan = await generatePlan({
-      profile: body.profile,
-      tier,
-      userGoalsText: body.userGoalsText,
-      satelliteImageBase64: satellite?.base64,
-      hasBoundary: !!satellite?.hasOutline,
-    });
+        const plan = await generatePlan({
+          profile,
+          tier,
+          userGoalsText: body.userGoalsText,
+          satelliteImageBase64: satellite?.base64,
+          hasBoundary: !!satellite?.hasOutline,
+        });
 
-    // Turn each outline the AI traced on the photo into map coordinates
-    plan.tasks = plan.tasks.map((t) => {
-      const { areaPixels, ...task } = t as typeof t & { areaPixels?: unknown };
-      const area = ringFromPixels(satellite, areaPixels);
-      return area ? { ...task, area } : task;
-    });
+        // Turn each outline the AI traced on the photo into map coordinates
+        plan.tasks = plan.tasks.map((t) => {
+          const { areaPixels, ...task } = t as typeof t & { areaPixels?: unknown };
+          const area = ringFromPixels(satellite, areaPixels);
+          return area ? { ...task, area } : task;
+        });
 
-    const response: GeneratePlanResponse = { plan };
-    return NextResponse.json(response);
+        if (rebuildOf) {
+          const saved = await replacePlan(rebuildOf, plan);
+          if (!saved) throw new Error('No existing plan for property');
+          return { plan: saved, saved: true };
+        }
+        const response: GeneratePlanResponse = { plan };
+        return response;
+      } catch (err) {
+        console.error('[generate-plan] ERROR:', err instanceof Error ? err.message : String(err));
+        await releaseAiUsage(userId, route);
+        return { error: 'We could not build your plan just now. Please try again in a minute.' };
+      }
+    })();
+    return keepAliveJson(work);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[generate-plan] ERROR:', msg);

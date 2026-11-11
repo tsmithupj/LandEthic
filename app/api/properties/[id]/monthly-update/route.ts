@@ -10,6 +10,7 @@ import { getUserTier } from '@/lib/tier-server';
 import { enforceAiLimit, releaseAiUsage } from '@/lib/rate-limit';
 import { generateMonthlyUpdate } from '@/lib/claude';
 import { fetchSatelliteSnapshot, ringFromPixels } from '@/lib/satellite';
+import { keepAliveJson } from '@/lib/keep-alive';
 import {
   MONTHLY_PLAN, monthKey, monthLabel, monthNumOf, parseMonthKey, parseMonthLabel, planMonthlyUpdate, seasonOf,
 } from '@/lib/months';
@@ -80,82 +81,83 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const limited = await enforceAiLimit(userId, 'monthly-update', tier);
   if (limited) return limited;
 
-  // ── Work out what changes ────────────────────────────────────────────────
-  const { overdue, newMonths, upcoming } = planMonthlyUpdate(taskRows, current, cfg.months);
-  const completed = taskRows
-    .filter((t) => t.completed)
-    .sort((a, b) => (b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0));
+  // The AI part can take a few minutes — keep the connection alive, and finish and
+  // save even if the visitor's connection drops part-way.
+  const work = (async () => {
+    try {
+      // ── Work out what changes ────────────────────────────────────────────────
+      const { overdue, newMonths, upcoming } = planMonthlyUpdate(taskRows, current, cfg.months);
+      const completed = taskRows
+        .filter((t) => t.completed)
+        .sort((a, b) => (b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0));
 
-  const ring = property.boundary?.[0];
-  const satellite = newMonths.length > 0 && ring && ring.length >= 3
-    ? await fetchSatelliteSnapshot(property.boundary)
-    : null;
+      const ring = property.boundary?.[0];
+      const satellite = newMonths.length > 0 && ring && ring.length >= 3
+        ? await fetchSatelliteSnapshot(property.boundary)
+        : null;
 
-  let update;
-  try {
-    update = await generateMonthlyUpdate({
-      profile: toPropertyProfile(property),
-      tier,
-      userGoalsText: typeof body.userGoalsText === 'string' ? body.userGoalsText.slice(0, 2000) : undefined,
-      currentMonth: monthLabel(current),
-      currentSeason: seasonOf(current),
-      newMonths: newMonths.map(monthLabel),
-      perMonth: cfg.perMonth,
-      completedTitles: completed.slice(0, 30).map((t) => t.title),
-      carriedOverTitles: overdue.map((t) => t.title),
-      upcomingTitles: upcoming.slice(0, 40).map((t) => t.title),
-      satelliteImageBase64: satellite?.base64,
-      hasBoundary: !!satellite?.hasOutline,
-    });
-  } catch (err) {
-    console.error('[monthly-update] AI error:', err instanceof Error ? err.message : err);
-    await releaseAiUsage(userId, 'monthly-update');
-    return NextResponse.json(
-      { error: 'We could not build your monthly update just now. Please try again in a minute.' },
-      { status: 500 },
-    );
-  }
+      const update = await generateMonthlyUpdate({
+        profile: toPropertyProfile(property),
+        tier,
+        userGoalsText: typeof body.userGoalsText === 'string' ? body.userGoalsText.slice(0, 2000) : undefined,
+        currentMonth: monthLabel(current),
+        currentSeason: seasonOf(current),
+        newMonths: newMonths.map(monthLabel),
+        perMonth: cfg.perMonth,
+        completedTitles: completed.slice(0, 30).map((t) => t.title),
+        carriedOverTitles: overdue.map((t) => t.title),
+        upcomingTitles: upcoming.slice(0, 40).map((t) => t.title),
+        satelliteImageBase64: satellite?.base64,
+        hasBoundary: !!satellite?.hasOutline,
+      });
 
-  const newTasks: ActionTask[] = update.tasks.map((t) => {
-    const { areaPixels, ...task } = t;
-    const area = ringFromPixels(satellite, areaPixels);
-    const m = parseMonthLabel(task.month);
-    return {
-      ...task,
-      id: '',
-      ...(area ? { area } : {}),
-      season: m !== null ? seasonOf(m) : task.season,
-    } as ActionTask;
-  });
+      const newTasks: ActionTask[] = update.tasks.map((t) => {
+        const { areaPixels, ...task } = t;
+        const area = ringFromPixels(satellite, areaPixels);
+        const m = parseMonthLabel(task.month);
+        return {
+          ...task,
+          id: '',
+          ...(area ? { area } : {}),
+          season: m !== null ? seasonOf(m) : task.season,
+        } as ActionTask;
+      });
 
-  // ── Save ─────────────────────────────────────────────────────────────────
-  const queries: BatchItem<'pg'>[] = [
-    ...overdue.map((t) =>
-      db
-        .update(tasks)
-        .set({
-          month: monthLabel(current),
-          season: seasonOf(current),
-          tags: t.tags.includes(CARRIED_TAG) ? t.tags : [CARRIED_TAG, ...t.tags],
-        })
-        .where(eq(tasks.id, t.id)),
-    ),
-    db
-      .update(plans)
-      .set({ lastMonthlyUpdate: monthKey(current), monthlyNote: update.note || null })
-      .where(eq(plans.id, plan.id)),
-  ];
-  if (newTasks.length) {
-    queries.push(db.insert(tasks).values(newTasks.map((t) => toTaskInsert(t, plan.id, propertyId))));
-  }
-  await db.batch(queries as [BatchItem<'pg'>, ...BatchItem<'pg'>[]]);
+      // ── Save ─────────────────────────────────────────────────────────────────
+      const queries: BatchItem<'pg'>[] = [
+        ...overdue.map((t) =>
+          db
+            .update(tasks)
+            .set({
+              month: monthLabel(current),
+              season: seasonOf(current),
+              tags: t.tags.includes(CARRIED_TAG) ? t.tags : [CARRIED_TAG, ...t.tags],
+            })
+            .where(eq(tasks.id, t.id)),
+        ),
+        db
+          .update(plans)
+          .set({ lastMonthlyUpdate: monthKey(current), monthlyNote: update.note || null })
+          .where(eq(plans.id, plan.id)),
+      ];
+      if (newTasks.length) {
+        queries.push(db.insert(tasks).values(newTasks.map((t) => toTaskInsert(t, plan.id, propertyId))));
+      }
+      await db.batch(queries as [BatchItem<'pg'>, ...BatchItem<'pg'>[]]);
 
-  const [savedPlan] = await db.select().from(plans).where(eq(plans.id, plan.id));
-  const savedTasks = await db.select().from(tasks).where(eq(tasks.planId, plan.id));
+      const [savedPlan] = await db.select().from(plans).where(eq(plans.id, plan.id));
+      const savedTasks = await db.select().from(tasks).where(eq(tasks.planId, plan.id));
 
-  return NextResponse.json({
-    plan: toActionPlan(propertyId, savedPlan, savedTasks),
-    added: newTasks.length,
-    carriedOver: overdue.length,
-  });
+      return {
+        plan: toActionPlan(propertyId, savedPlan, savedTasks),
+        added: newTasks.length,
+        carriedOver: overdue.length,
+      };
+    } catch (err) {
+      console.error('[monthly-update] error:', err instanceof Error ? err.message : err);
+      await releaseAiUsage(userId, 'monthly-update');
+      return { error: 'We could not build your monthly update just now. Please try again in a minute.' };
+    }
+  })();
+  return keepAliveJson(work);
 }

@@ -18,6 +18,55 @@ import { TIER_PROPERTY_LIMITS } from '@/lib/tiers';
 // Re-exported so existing imports keep working; the source of truth is lib/tiers.ts
 export { TIER_PROPERTY_LIMITS };
 
+/** The connection dropped before the server answered (phone slept, Wi-Fi blip, …). */
+export class ConnectionLost extends Error {
+  constructor() {
+    super('We lost the connection to LandEthic. Check your internet and try again.');
+  }
+}
+
+/** POST JSON and return the answer, or throw an Error with a plain-language message. */
+export async function postJson<T>(url: string, body: unknown, fallback: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  } catch {
+    throw new ConnectionLost();
+  }
+  let data: (T & { error?: string }) | null;
+  try {
+    data = await res.json();
+  } catch {
+    // The slow AI routes stream their answer — a drop part-way through lands here
+    if (res.ok) throw new ConnectionLost();
+    data = null;
+  }
+  if (!res.ok || !data || data.error) throw new Error(data?.error ?? fallback);
+  return data;
+}
+
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * After a dropped connection during a plan rebuild: the server keeps working and
+ * saves the plan itself, so check back for it for a few minutes.
+ */
+async function waitForRebuiltPlan(propertyId: string, previousGeneratedAt: string | undefined): Promise<ActionPlan | null> {
+  for (let i = 0; i < 30; i++) {
+    await sleep(10_000);
+    try {
+      const res = await fetch('/api/properties');
+      if (!res.ok) continue;
+      const data = (await res.json()) as { entries: PropertyEntry[] };
+      const entry = data.entries.find((e) => e.property.id === propertyId);
+      if (entry?.plan && entry.plan.generatedAt !== previousGeneratedAt) return entry.plan;
+    } catch {
+      // still offline — keep waiting
+    }
+  }
+  return null;
+}
+
 // A single saved property with its plan and context
 export interface PropertyEntry {
   property: PropertyProfile;
@@ -87,7 +136,7 @@ interface LandEthicStore {
 
   // Actions
   analyzeAndPlan:  () => Promise<boolean>;
-  regeneratePlan:  () => Promise<boolean>;
+  regeneratePlan:  (goalsText?: string) => Promise<boolean>;
   refreshInsights: () => Promise<boolean>;
   /** Naturalist+: carry over unfinished tasks and add this month's new ones. */
   monthlyUpdate:   () => Promise<boolean>;
@@ -230,39 +279,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setAnalyzeError(null);
 
     try {
-      const analyzeRes = await fetch('/api/analyze-property', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const analyzeData = await postJson<{ profile: PropertyProfile; insights?: Insight[] }>(
+        '/api/analyze-property',
+        {
           address,
           acreage: acreage ? parseFloat(acreage) : undefined,
           goals,
           userGoalsText: userGoalsText || undefined,
           boundary: boundary ?? undefined,
-        }),
-      });
-
-      if (!analyzeRes.ok) {
-        const err = await analyzeRes.json();
-        throw new Error(err.error ?? 'Property analysis failed');
-      }
-
-      const analyzeData  = await analyzeRes.json();
+        },
+        'Property analysis failed',
+      );
       const profile: PropertyProfile = analyzeData.profile;
 
       setAnalyzeStage('planning');
-      const planRes = await fetch('/api/generate-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile, tier, userGoalsText: userGoalsText || undefined, boundary: boundary ?? undefined }),
-      });
-
-      if (!planRes.ok) {
-        const err = await planRes.json();
-        throw new Error(err.error ?? 'Plan generation failed');
-      }
-
-      const planData = await planRes.json();
+      const planData = await postJson<{ plan: ActionPlan }>(
+        '/api/generate-plan',
+        { profile, tier, userGoalsText: userGoalsText || undefined, boundary: boundary ?? undefined },
+        'Plan generation failed',
+      );
       const newPlan: ActionPlan = planData.plan;
       const newInsights: Insight[] = analyzeData.insights ?? [];
 
@@ -305,23 +340,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!property || !activePropertyId) return false;
     setAnalyzeError(null);
     try {
-      const res = await fetch('/api/analyze-property', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const data = await postJson<{ insights?: Insight[] }>(
+        '/api/analyze-property',
+        {
           address: property.address,
           acreage: property.acreage,
           goals: property.goals,
           userGoalsText: userGoalsText || undefined,
           boundary: activeEntry?.boundary ?? undefined,
           refreshPropertyId: activePropertyId,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error ?? 'Updating insights failed');
-      }
-      const data = await res.json();
+        },
+        'Updating insights failed',
+      );
       const newInsights: Insight[] = data.insights ?? [];
 
       const saveRes = await fetch(`/api/properties/${activePropertyId}/insights`, {
@@ -347,51 +377,59 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [property, activePropertyId, activeEntry, userGoalsText]);
 
   // Regenerate plan only — re-uses the existing property profile (no re-analysis)
-  const regeneratePlan = useCallback(async (): Promise<boolean> => {
+  // `goalsText` lets the caller pass goals typed a moment ago (state updates land on the next render).
+  const regeneratePlan = useCallback(async (goalsText?: string): Promise<boolean> => {
     if (!property || !activePropertyId) return false;
+    const propertyId = activePropertyId;
+    const previousGeneratedAt = activeEntry?.plan?.generatedAt;
+    const showPlan = (newPlan: ActionPlan) =>
+      setPropertyEntries((prev) =>
+        prev.map((entry) => (entry.property.id === propertyId ? { ...entry, plan: newPlan } : entry))
+      );
+
     setIsAnalyzing(true);
     setAnalyzeStage('planning');
     setAnalyzeError(null);
     try {
-      const planRes = await fetch('/api/generate-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const goals = goalsText ?? userGoalsText;
+      const planData = await postJson<{ plan: ActionPlan; saved?: boolean }>(
+        '/api/generate-plan',
+        {
           profile: property,
           tier,
-          userGoalsText: userGoalsText || undefined,
+          userGoalsText: goals || undefined,
           boundary: activeEntry?.boundary ?? undefined,
-          propertyId: activePropertyId, // a rebuild — counts against the monthly rebuild allowance
-        }),
-      });
-      if (!planRes.ok) {
-        const err = await planRes.json();
-        throw new Error(err.error ?? 'Plan generation failed');
-      }
-      const planData = await planRes.json();
-      const generatedPlan: ActionPlan = planData.plan;
-
-      setAnalyzeStage('saving');
-      const saveRes = await fetch(`/api/properties/${activePropertyId}/plan`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: generatedPlan }),
-      });
-      if (!saveRes.ok) {
-        const err = await saveRes.json();
-        throw new Error(err.error ?? 'Saving plan failed');
-      }
-      const saveData = await saveRes.json();
-      const newPlan: ActionPlan = saveData.plan;
-
-      setPropertyEntries((prev) =>
-        prev.map((entry) => {
-          if (entry.property.id !== activePropertyId) return entry;
-          return { ...entry, plan: newPlan };
-        })
+          propertyId, // a rebuild — counts against the monthly rebuild allowance
+        },
+        'Plan generation failed',
       );
+
+      let newPlan: ActionPlan = planData.plan;
+      if (!planData.saved) {
+        // Older servers hand the plan back unsaved
+        setAnalyzeStage('saving');
+        const saveRes = await fetch(`/api/properties/${propertyId}/plan`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan: newPlan }),
+        });
+        const saveData = await saveRes.json().catch(() => ({}));
+        if (!saveRes.ok) throw new Error(saveData.error ?? 'Saving plan failed');
+        newPlan = saveData.plan;
+      }
+      showPlan(newPlan);
       return true;
     } catch (err) {
+      if (err instanceof ConnectionLost) {
+        // The server keeps building and saves the plan itself — wait for it to show up
+        const saved = await waitForRebuiltPlan(propertyId, previousGeneratedAt);
+        if (saved) {
+          showPlan(saved);
+          return true;
+        }
+        setAnalyzeError('Your new plan is taking longer than usual. It will appear here once it\'s ready — check back in a few minutes.');
+        return false;
+      }
       setAnalyzeError(err instanceof Error ? err.message : 'Plan regeneration failed');
       return false;
     } finally {
@@ -406,24 +444,42 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setIsAnalyzing(true);
     setAnalyzeStage('planning');
     setAnalyzeError(null);
-    try {
-      const res = await fetch(`/api/properties/${activePropertyId}/monthly-update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          month: monthKey(monthNumOf(new Date())),
-          userGoalsText: userGoalsText || undefined,
-        }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { plan?: ActionPlan; error?: string };
-      if (!res.ok || !data.plan) throw new Error(data.error ?? 'Monthly update failed');
-      const newPlan = data.plan;
-      setAnalyzeStage('saving');
+    const propertyId = activePropertyId;
+    const month = monthKey(monthNumOf(new Date()));
+    const showPlan = (newPlan: ActionPlan) =>
       setPropertyEntries((prev) =>
-        prev.map((entry) => (entry.property.id === activePropertyId ? { ...entry, plan: newPlan } : entry))
+        prev.map((entry) => (entry.property.id === propertyId ? { ...entry, plan: newPlan } : entry))
       );
+    try {
+      const data = await postJson<{ plan?: ActionPlan }>(
+        `/api/properties/${propertyId}/monthly-update`,
+        { month, userGoalsText: userGoalsText || undefined },
+        'Monthly update failed',
+      );
+      if (!data.plan) throw new Error('Monthly update failed');
+      setAnalyzeStage('saving');
+      showPlan(data.plan);
       return true;
     } catch (err) {
+      if (err instanceof ConnectionLost) {
+        // The server finishes and saves the update anyway — wait for it to show up
+        for (let i = 0; i < 30; i++) {
+          await sleep(10_000);
+          try {
+            const res = await fetch('/api/properties');
+            const data = res.ok ? ((await res.json()) as { entries: PropertyEntry[] }) : null;
+            const saved = data?.entries.find((e) => e.property.id === propertyId)?.plan;
+            if (saved?.lastMonthlyUpdate === month) {
+              showPlan(saved);
+              return true;
+            }
+          } catch {
+            // still offline — keep waiting
+          }
+        }
+        setAnalyzeError('Your monthly update is taking longer than usual. It will appear here once it\'s ready — check back in a few minutes.');
+        return false;
+      }
       setAnalyzeError(err instanceof Error ? err.message : 'Monthly update failed');
       return false;
     } finally {

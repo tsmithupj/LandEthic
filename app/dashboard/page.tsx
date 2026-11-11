@@ -606,7 +606,8 @@ function DashboardPageContent() {
                       setUserGoalsText(goalsInput);
                       setEditingGoals(false);
                       setRegenError(null);
-                      const ok = await regeneratePlan();
+                      // Pass the new goals straight in — the saved text only updates on the next render
+                      const ok = await regeneratePlan(goalsInput);
                       if (!ok) setRegenError('Could not regenerate plan. Try again.');
                     }}
                     disabled={isAnalyzing}

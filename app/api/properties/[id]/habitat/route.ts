@@ -10,6 +10,7 @@ import { getUserTier } from '@/lib/tier-server';
 import { enforceAiLimit, releaseAiUsage } from '@/lib/rate-limit';
 import { generateHabitatPlan } from '@/lib/claude';
 import { fetchSatelliteSnapshot, ringFromPixels } from '@/lib/satellite';
+import { keepAliveJson } from '@/lib/keep-alive';
 import type { FoodPlot, NestingBox } from '@/types';
 
 // Studying the photo and writing both plans can take a minute or two.
@@ -57,89 +58,82 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const limited = await enforceAiLimit(userId, 'habitat-plan', tier);
   if (limited) return limited;
 
-  const ring = property.boundary?.[0];
-  const satellite = ring && ring.length >= 3 ? await fetchSatelliteSnapshot(property.boundary) : null;
+  // Studying the photo and writing both plans takes a few minutes — keep the
+  // connection alive, and finish and save even if the visitor's connection drops.
+  const work = (async () => {
+    try {
+      const ring = property.boundary?.[0];
+      const satellite = ring && ring.length >= 3 ? await fetchSatelliteSnapshot(property.boundary) : null;
 
-  let out;
-  try {
-    out = await generateHabitatPlan({
-      profile: toPropertyProfile(property),
-      userGoalsText: typeof body.userGoalsText === 'string' ? body.userGoalsText.slice(0, 2000) : undefined,
-      satelliteImageBase64: satellite?.base64,
-      hasBoundary: !!satellite?.hasOutline,
-    });
-  } catch (err) {
-    console.error('[habitat] AI error:', err instanceof Error ? err.message : err);
-    await releaseAiUsage(userId, 'habitat-plan');
-    return NextResponse.json(
-      { error: 'We could not build your plan just now. Please try again in a minute.' },
-      { status: 500 },
-    );
-  }
+      const out = await generateHabitatPlan({
+        profile: toPropertyProfile(property),
+        userGoalsText: typeof body.userGoalsText === 'string' ? body.userGoalsText.slice(0, 2000) : undefined,
+        satelliteImageBase64: satellite?.base64,
+        hasBoundary: !!satellite?.hasOutline,
+      });
 
-  const num = (v: unknown, fallback = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || fallback);
-  const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x.trim()) : []);
+      const num = (v: unknown, fallback = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || fallback);
+      const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x.trim()) : []);
 
-  const foodPlots: FoodPlot[] = out.foodPlots.map((p) => {
-    const area = ringFromPixels(satellite, p.areaPixels);
-    return {
-      id: randomUUID(),
-      name: String(p.name ?? 'Food plot'),
-      acres: Math.round(num(p.acres, 0.25) * 100) / 100,
-      where: String(p.where ?? ''),
-      ...(area ? { area } : {}),
-      targetWildlife: strs(p.targetWildlife),
-      seedMix: (Array.isArray(p.seedMix) ? p.seedMix : [])
-        .filter((s) => s && typeof s.seed === 'string')
-        .map((s) => ({ seed: s.seed, lbsPerAcre: num(s.lbsPerAcre), ...(s.notes ? { notes: String(s.notes) } : {}) })),
-      plantingWindow: String(p.plantingWindow ?? ''),
-      soilPrep: strs(p.soilPrep),
-      limeAndFertilizer: p.limeAndFertilizer ? String(p.limeAndFertilizer) : undefined,
-      maintenance: strs(p.maintenance),
-      why: String(p.why ?? ''),
-    };
-  });
+      const foodPlots: FoodPlot[] = out.foodPlots.map((p) => {
+        const area = ringFromPixels(satellite, p.areaPixels);
+        return {
+          id: randomUUID(),
+          name: String(p.name ?? 'Food plot'),
+          acres: Math.round(num(p.acres, 0.25) * 100) / 100,
+          where: String(p.where ?? ''),
+          ...(area ? { area } : {}),
+          targetWildlife: strs(p.targetWildlife),
+          seedMix: (Array.isArray(p.seedMix) ? p.seedMix : [])
+            .filter((s) => s && typeof s.seed === 'string')
+            .map((s) => ({ seed: s.seed, lbsPerAcre: num(s.lbsPerAcre), ...(s.notes ? { notes: String(s.notes) } : {}) })),
+          plantingWindow: String(p.plantingWindow ?? ''),
+          soilPrep: strs(p.soilPrep),
+          limeAndFertilizer: p.limeAndFertilizer ? String(p.limeAndFertilizer) : undefined,
+          maintenance: strs(p.maintenance),
+          why: String(p.why ?? ''),
+        };
+      });
 
-  const nestingBoxes: NestingBox[] = out.nestingBoxes.map((b) => {
-    const area = ringFromPixels(satellite, b.areaPixels);
-    return {
-      id: randomUUID(),
-      species: String(b.species ?? 'Nest box'),
-      boxType: String(b.boxType ?? ''),
-      count: Math.max(1, Math.round(num(b.count, 1))),
-      mountHeight: String(b.mountHeight ?? ''),
-      facing: String(b.facing ?? ''),
-      spacing: b.spacing ? String(b.spacing) : undefined,
-      where: String(b.where ?? ''),
-      ...(area ? { area } : {}),
-      putUpBy: b.putUpBy ? String(b.putUpBy) : undefined,
-      cleanOut: b.cleanOut ? String(b.cleanOut) : undefined,
-      tips: strs(b.tips),
-      why: String(b.why ?? ''),
-    };
-  });
+      const nestingBoxes: NestingBox[] = out.nestingBoxes.map((b) => {
+        const area = ringFromPixels(satellite, b.areaPixels);
+        return {
+          id: randomUUID(),
+          species: String(b.species ?? 'Nest box'),
+          boxType: String(b.boxType ?? ''),
+          count: Math.max(1, Math.round(num(b.count, 1))),
+          mountHeight: String(b.mountHeight ?? ''),
+          facing: String(b.facing ?? ''),
+          spacing: b.spacing ? String(b.spacing) : undefined,
+          where: String(b.where ?? ''),
+          ...(area ? { area } : {}),
+          putUpBy: b.putUpBy ? String(b.putUpBy) : undefined,
+          cleanOut: b.cleanOut ? String(b.cleanOut) : undefined,
+          tips: strs(b.tips),
+          why: String(b.why ?? ''),
+        };
+      });
 
-  const values = {
-    foodPlots,
-    foodPlotNote: out.foodPlotNote ?? null,
-    nestingBoxes,
-    nestingBoxNote: out.nestingBoxNote ?? null,
-    generatedAt: new Date(),
-  };
+      const values = {
+        foodPlots,
+        foodPlotNote: out.foodPlotNote ?? null,
+        nestingBoxes,
+        nestingBoxNote: out.nestingBoxNote ?? null,
+        generatedAt: new Date(),
+      };
 
-  try {
-    const db = getDb();
-    const [row] = await db
-      .insert(habitatPlans)
-      .values({ propertyId, ...values })
-      .onConflictDoUpdate({ target: habitatPlans.propertyId, set: values })
-      .returning();
-    return NextResponse.json({ habitat: toHabitatPlan(row) });
-  } catch (err) {
-    console.error('[habitat] save failed (is the habitat_plans table created?):', err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: 'Your plan was built but could not be saved. Please try again.' },
-      { status: 500 },
-    );
-  }
+      const db = getDb();
+      const [row] = await db
+        .insert(habitatPlans)
+        .values({ propertyId, ...values })
+        .onConflictDoUpdate({ target: habitatPlans.propertyId, set: values })
+        .returning();
+      return { habitat: toHabitatPlan(row) };
+    } catch (err) {
+      console.error('[habitat] error:', err instanceof Error ? err.message : err);
+      await releaseAiUsage(userId, 'habitat-plan');
+      return { error: 'We could not build your plan just now. Please try again in a minute.' };
+    }
+  })();
+  return keepAliveJson(work);
 }

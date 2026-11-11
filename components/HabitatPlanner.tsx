@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useStore } from '@/lib/store';
+import { ConnectionLost, postJson, sleep, useStore } from '@/lib/store';
 import type { FoodPlot, HabitatPlan, NestingBox } from '@/types';
 import AppHeader from '@/components/AppHeader';
 import { Icon, Seal, Spinner } from '@/components/brand';
@@ -321,17 +321,37 @@ export default function HabitatPlanner({ kind }: { kind: Kind }) {
     if (!activePropertyId) return;
     setBuilding(true);
     setError(null);
+    const propertyId = activePropertyId;
+    const previous = habitat?.generatedAt;
     try {
-      const res = await fetch(`/api/properties/${activePropertyId}/habitat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userGoalsText: userGoalsText || undefined }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { habitat?: HabitatPlan; error?: string };
-      if (!res.ok || !data.habitat) throw new Error(data.error ?? 'Could not build your plan. Try again in a minute.');
+      const data = await postJson<{ habitat?: HabitatPlan }>(
+        `/api/properties/${propertyId}/habitat`,
+        { userGoalsText: userGoalsText || undefined },
+        'Could not build your plan. Try again in a minute.',
+      );
+      if (!data.habitat) throw new Error('Could not build your plan. Try again in a minute.');
       setHabitat(data.habitat);
       setSelected(null);
     } catch (err) {
+      if (err instanceof ConnectionLost) {
+        // The server finishes and saves the plan anyway — wait for it to show up
+        for (let i = 0; i < 30; i++) {
+          await sleep(10_000);
+          try {
+            const res = await fetch(`/api/properties/${propertyId}/habitat`);
+            const data = res.ok ? ((await res.json()) as { habitat: HabitatPlan | null }) : null;
+            if (data?.habitat && data.habitat.generatedAt !== previous) {
+              setHabitat(data.habitat);
+              setSelected(null);
+              return;
+            }
+          } catch {
+            // still offline — keep waiting
+          }
+        }
+        setError('Your plan is taking longer than usual. It will appear here once it\'s ready — check back in a few minutes.');
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Could not build your plan. Try again in a minute.');
     } finally {
       setBuilding(false);

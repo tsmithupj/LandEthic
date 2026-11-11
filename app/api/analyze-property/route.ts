@@ -6,6 +6,7 @@ import { getUserTier, getPropertyAllowance } from '@/lib/tier-server';
 import { getOwnedProperty } from '@/lib/db/ownership';
 import { enforceAiLimit, releaseAiUsage, type AiRoute } from '@/lib/rate-limit';
 import { fetchSatelliteSnapshot, ringFromPixels } from '@/lib/satellite';
+import { keepAliveJson } from '@/lib/keep-alive';
 
 export const maxDuration = 120;
 
@@ -95,52 +96,61 @@ export async function POST(req: NextRequest) {
     if (limited) return limited;
     charged = { userId, route };
 
-    // Parse county/state from address (best-effort)
-    const parts  = body.address.split(',').map((s) => s.trim());
-    const state  = parts[parts.length - 1]?.replace(/\d+/g, '').trim();
-    const county = parts[parts.length - 2]?.trim();
+    // The AI part can take a minute or more — keep the connection alive while it works
+    const work = (async () => {
+      try {
+        // Parse county/state from address (best-effort)
+        const parts  = body.address.split(',').map((s) => s.trim());
+        const state  = parts[parts.length - 1]?.replace(/\d+/g, '').trim();
+        const county = parts[parts.length - 2]?.trim();
 
-    // Enrich with real location data
-    const coords = await geocodeAddress(body.address);
-    const hasBoundary = (body.boundary?.[0]?.length ?? 0) >= 3;
-    const [hardinessZone, soilData, satellite] = await Promise.all([
-      coords ? getHardinessZone(coords.lat, coords.lng) : null,
-      coords ? getSoilData(coords.lat, coords.lng) : null,
-      // Satellite photo of the parcel so the AI can point to real spots on the land
-      hasBoundary || coords ? fetchSatelliteSnapshot(body.boundary, coords ?? undefined) : null,
-    ]);
+        // Enrich with real location data
+        const coords = await geocodeAddress(body.address);
+        const hasBoundary = (body.boundary?.[0]?.length ?? 0) >= 3;
+        const [hardinessZone, soilData, satellite] = await Promise.all([
+          coords ? getHardinessZone(coords.lat, coords.lng) : null,
+          coords ? getSoilData(coords.lat, coords.lng) : null,
+          // Satellite photo of the parcel so the AI can point to real spots on the land
+          hasBoundary || coords ? fetchSatelliteSnapshot(body.boundary, coords ?? undefined) : null,
+        ]);
 
-    console.log('[analyze-property] enriched data:', { coords, hardinessZone, soilData, satellite: !!satellite });
+        console.log('[analyze-property] enriched data:', { coords, hardinessZone, soilData, satellite: !!satellite });
 
-    const result = await analyzeProperty({
-      address:       body.address,
-      acreage:       body.acreage ? parseFloat(String(body.acreage)) : undefined,
-      goals:         body.goals,
-      userGoalsText: (body as { userGoalsText?: string }).userGoalsText,
-      county,
-      state,
-      coordinates:   coords ?? undefined,
-      hardinessZone: hardinessZone ?? undefined,
-      soilData:      soilData ?? undefined,
-      satelliteImageBase64: satellite?.base64,
-      hasBoundary: !!satellite?.hasOutline,
-    });
+        const result = await analyzeProperty({
+          address:       body.address,
+          acreage:       body.acreage ? parseFloat(String(body.acreage)) : undefined,
+          goals:         body.goals,
+          userGoalsText: (body as { userGoalsText?: string }).userGoalsText,
+          county,
+          state,
+          coordinates:   coords ?? undefined,
+          hardinessZone: hardinessZone ?? undefined,
+          soilData:      soilData ?? undefined,
+          satelliteImageBase64: satellite?.base64,
+          hasBoundary: !!satellite?.hasOutline,
+        });
 
-    const response: AnalyzePropertyResponse = {
-      profile: {
-        ...result.profile,
-        id:           `prop-${Date.now()}`,
-        createdAt:    new Date().toISOString(),
-        ecosystemScore: result.ecosystemScore,
-      },
-      // Turn each outline the AI traced on the photo into map coordinates
-      insights: result.insights.map(({ areaPixels, ...insight }) => {
-        const area = ringFromPixels(satellite, areaPixels);
-        return area ? { ...insight, area } : insight;
-      }),
-    };
-
-    return NextResponse.json(response);
+        const response: AnalyzePropertyResponse = {
+          profile: {
+            ...result.profile,
+            id:           `prop-${Date.now()}`,
+            createdAt:    new Date().toISOString(),
+            ecosystemScore: result.ecosystemScore,
+          },
+          // Turn each outline the AI traced on the photo into map coordinates
+          insights: result.insights.map(({ areaPixels, ...insight }) => {
+            const area = ringFromPixels(satellite, areaPixels);
+            return area ? { ...insight, area } : insight;
+          }),
+        };
+        return response;
+      } catch (err) {
+        console.error('[analyze-property]', err instanceof Error ? err.message : String(err));
+        await releaseAiUsage(userId, route);
+        return { error: 'We could not analyze this property just now. Please try again in a minute.' };
+      }
+    })();
+    return keepAliveJson(work);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[analyze-property]', msg);
