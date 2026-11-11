@@ -121,7 +121,7 @@ In your Vercel project → **Settings → Environment Variables**, add:
 | `STRIPE_WEBHOOK_SECRET` | `whsec_...` | See below — created per-environment, not reused from local dev |
 | `NEXT_PUBLIC_APP_URL` | `https://your-app.vercel.app` | Your Vercel deployment URL |
 
-Run `npx drizzle-kit push` once against your Neon `DATABASE_URL` to create the `properties`, `plans`, `tasks`, `subscriptions`, and `ai_usage` tables before the first deploy. Re-run it whenever `lib/db/schema.ts` changes (it only adds what's missing).
+Run `npx drizzle-kit push` once against your Neon `DATABASE_URL` to create the `properties`, `plans`, `tasks`, `subscriptions`, `ai_usage`, `species_ids`, and `habitat_plans` tables before the first deploy (the SQL for each step is also in `drizzle/0000`–`0004`). Re-run it whenever `lib/db/schema.ts` changes (it only adds what's missing).
 
 **Production Stripe webhook:** in the Stripe Dashboard → **Developers → Webhooks → Add endpoint**, use `https://your-app.vercel.app/api/stripe/webhook` and subscribe to `checkout.session.completed`, `customer.subscription.updated`, and `customer.subscription.deleted`. Copy that endpoint's signing secret into `STRIPE_WEBHOOK_SECRET` in Vercel — it's different from the one the Stripe CLI gives you for local dev.
 
