@@ -53,3 +53,15 @@ export function planForPriceId(priceId: string): { tier: PaidTier; interval: Bil
 export function tierForPriceId(priceId: string): SubscriptionTier | null {
   return planForPriceId(priceId)?.tier ?? null;
 }
+
+// Our prices carry lookup keys like "landethic_steward_yearly_2026" (scripts/stripe-setup.ts),
+// so a price is still recognised after its id changes (new prices, test → live).
+const LOOKUP_KEY = /^landethic_(steward|naturalist|conservationist)_(monthly|yearly)(?:_|$)/;
+
+/** Which plan a Stripe price belongs to — by id first, then by its lookup key. */
+export function planForPrice(price: { id: string; lookup_key?: string | null }): { tier: PaidTier; interval: BillingInterval } | null {
+  const byId = planForPriceId(price.id);
+  if (byId) return byId;
+  const m = price.lookup_key ? LOOKUP_KEY.exec(price.lookup_key) : null;
+  return m ? { tier: m[1] as PaidTier, interval: m[2] === 'yearly' ? 'year' : 'month' } : null;
+}

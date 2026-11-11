@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   // Free gets a few IDs to try it; the monthly allowance in lib/rate-limit.ts decides.
   const tier = await getUserTier();
 
-  const body = await req.json() as {
+  const body = await req.json().catch(() => ({})) as {
     imageBase64: string;   // base64-encoded image (without data: prefix)
     mimeType?: string;     // e.g. "image/jpeg"
     lat?: number;

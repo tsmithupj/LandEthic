@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { and, asc, count, desc, eq, gte } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db/client';
 import { aiUsage } from '@/lib/db/schema';
 import { getAccess } from '@/lib/access';
@@ -125,10 +125,21 @@ export async function enforceAiLimit(
       eq(aiUsage.route, route),
       gte(aiUsage.createdAt, since),
     );
-    const [row] = await db.select({ n: count() }).from(aiUsage).where(where);
+
+    // Record this use first, then count the uses that came before it. Two requests
+    // sent at the same moment can't both squeeze into the last spot this way.
+    const [mine] = await db.insert(aiUsage).values({ clerkUserId, route }).returning({ id: aiUsage.id });
+    const [row] = await db
+      .select({ n: count() })
+      .from(aiUsage)
+      .where(and(
+        where,
+        sql`(${aiUsage.createdAt}, ${aiUsage.id}) < (select created_at, id from ai_usage where id = ${mine.id})`,
+      ));
     const used = Number(row?.n ?? 0);
 
     if (used >= limit) {
+      await db.delete(aiUsage).where(eq(aiUsage.id, mine.id));
       // The oldest use in the window is the next one to expire
       const [oldest] = await db
         .select({ createdAt: aiUsage.createdAt })
@@ -143,7 +154,6 @@ export async function enforceAiLimit(
       );
     }
 
-    await db.insert(aiUsage).values({ clerkUserId, route });
     return null;
   } catch (err) {
     // Fail open — see note at the top of this file.

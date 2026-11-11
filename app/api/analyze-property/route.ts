@@ -64,7 +64,7 @@ async function getSoilData(lat: number, lng: number): Promise<string | null> {
 export async function POST(req: NextRequest) {
   let charged: { userId: string; route: AiRoute } | null = null;
   try {
-    const body: AnalyzePropertyRequest & { boundary?: number[][][]; refreshPropertyId?: string } = await req.json();
+    const body: AnalyzePropertyRequest & { boundary?: number[][][]; refreshPropertyId?: string } = await req.json().catch(() => ({}));
 
     if (!body.address || !body.goals?.length) {
       return NextResponse.json({ error: 'address and goals are required' }, { status: 400 });

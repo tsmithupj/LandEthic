@@ -2,9 +2,8 @@
 
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useState, useEffect, useMemo, useRef, Suspense, type ComponentType } from 'react';
-import { useUser } from '@clerk/nextjs';
 import { useStore } from '@/lib/store';
 import type { ActionTask } from '@/types';
 import { TIER_LABELS, formatPrice, planFor } from '@/lib/pricing';
@@ -12,7 +11,7 @@ import { TIER_ORDER } from '@/lib/tiers';
 import { clipToProperty } from '@/lib/geo';
 import WaitScreen from '@/components/WaitScreen';
 import MonthlyUpdate from '@/components/MonthlyUpdate';
-import { FreePlanBanner, LockedScreen } from '@/components/FreePlan';
+import { FinishingCheckout, FreePlanBanner, LockedScreen, PaymentIssueBanner, useFinishCheckout } from '@/components/FreePlan';
 import WeeklyChecklist from '@/components/WeeklyChecklist';
 import AppUserButton from '@/components/AppUserButton';
 import AppHeader, { TierTag } from '@/components/AppHeader';
@@ -378,8 +377,6 @@ function NoProperty() {
 
 function DashboardPageContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const { user } = useUser();
   const {
     property, plan, insights, boundary, address,
     propertyEntries, activePropertyId, switchProperty,
@@ -416,18 +413,22 @@ function DashboardPageContent() {
   const [goalsInput, setGoalsInput] = useState('');
   const [regenError, setRegenError] = useState<string | null>(null);
 
-  // Landing here straight from a completed Stripe Checkout — Clerk's cached
-  // publicMetadata is stale until reloaded (the webhook already updated it server-side).
-  useEffect(() => {
-    if (searchParams.get('checkout') === 'success') {
-      user?.reload();
-      router.replace('/dashboard');
-    }
-  }, [searchParams, user, router]);
+  // Landing here straight from a finished Stripe Checkout — switch the new plan on
+  // before showing anything (otherwise a just-paid member could see the locked screen).
+  const finishingCheckout = useFinishCheckout();
 
   // Show switcher for tiers that support multiple properties
   const showSwitcher = (tier === 'naturalist' || tier === 'conservationist') && propertyEntries.length > 0;
   const tierLabel = TIER_LABELS[tier];
+
+  if (finishingCheckout) return (
+    <div className="min-h-screen bg-cream-2">
+      <AppHeader>
+        <AppUserButton />
+      </AppHeader>
+      <FinishingCheckout />
+    </div>
+  );
 
   // Free plan (or a cancelled plan) has ended — everything is saved but locked
   if (access?.locked) return (
@@ -444,7 +445,7 @@ function DashboardPageContent() {
       <AppHeader>
         <AppUserButton />
       </AppHeader>
-      <div className="mx-auto max-w-3xl px-4 pt-6"><FreePlanBanner /></div>
+      <div className="mx-auto max-w-3xl space-y-4 px-4 pt-6"><FreePlanBanner /><PaymentIssueBanner /></div>
       <NoProperty />
     </div>
   );
@@ -545,6 +546,7 @@ function DashboardPageContent() {
 
         {/* Free plan countdown — every visit */}
         <FreePlanBanner />
+        <PaymentIssueBanner />
 
         {/* Monthly update — Naturalist / Conservationist */}
         <MonthlyUpdate />

@@ -15,7 +15,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const owned = await getOwnedProperty(userId, propertyId);
   if (!owned) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const body = (await req.json()) as { insights?: Insight[] };
+  const body = (await req.json().catch(() => ({}))) as { insights?: Insight[] };
   if (!Array.isArray(body.insights)) {
     return NextResponse.json({ error: 'insights are required' }, { status: 400 });
   }

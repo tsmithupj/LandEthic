@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useUser } from '@clerk/nextjs';
 import { useStore } from '@/lib/store';
 import { startCheckout } from '@/lib/checkout';
 import { DATA_KEEP_DAYS, formatPrice, planFor } from '@/lib/pricing';
@@ -124,6 +125,108 @@ export function LockedScreen() {
       </div>
     </div>
   );
+}
+
+/** Paying member whose renewal payment failed — Stripe is retrying; ask them to fix their card. */
+export function PaymentIssueBanner() {
+  const { access } = useStore();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!access?.paymentIssue) return null;
+
+  return (
+    <div className="rounded-2xl border-[1.5px] border-rust-600 bg-rust-100 p-5">
+      <p className="font-display text-base font-bold text-rust-700">Your last payment didn&apos;t go through</p>
+      <p className="mt-1 text-sm leading-relaxed text-rust-700">
+        Your plan is still on while we try your card again. Update your payment details to keep everything running.
+      </p>
+      <button
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            const res = await fetch('/api/stripe/portal', { method: 'POST' });
+            const data = (await res.json().catch(() => ({}))) as { url?: string };
+            if (!res.ok || !data.url) throw new Error();
+            window.location.href = data.url;
+          } catch {
+            setError('Could not open billing. Please try again.');
+            setBusy(false);
+          }
+        }}
+        disabled={busy}
+        className="btn-primary mt-3 !py-2.5 !text-sm"
+      >
+        {busy ? <><Spinner className="h-4 w-4" /> Opening billing…</> : <>Update payment <Icon.Arrow size={16} /></>}
+      </button>
+      {error && <p className="mt-2 text-xs text-rust-700">{error}</p>}
+    </div>
+  );
+}
+
+/** Shown for a few seconds after a finished Checkout while the new plan is switched on. */
+export function FinishingCheckout() {
+  return (
+    <div className="mx-auto max-w-md px-4 py-20 text-center">
+      <Seal size={64}><Spinner className="h-7 w-7" /></Seal>
+      <h1 className="mt-5 text-2xl font-bold text-ink">Payment received — thank you!</h1>
+      <p className="mt-3 text-sm leading-relaxed text-ink-soft">Switching on your plan. This only takes a moment…</p>
+    </div>
+  );
+}
+
+/**
+ * Back from a finished Stripe Checkout (?checkout=success&session_id=…): apply the
+ * new plan right away, reload the member, and keep checking for up to ~30 seconds
+ * in case Stripe is slow. Returns true while that's happening.
+ */
+export function useFinishCheckout(): boolean {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const { user, isLoaded } = useUser();
+  const { refreshAccess } = useStore();
+  const returning = searchParams.get('checkout') === 'success';
+  const sessionId = searchParams.get('session_id');
+  const [finishing, setFinishing] = useState(returning);
+  const started = useRef(false);
+  const mounted = useRef(true);
+  // Refs so reloading the user (which hands us a new user object) doesn't restart the loop
+  const userRef = useRef(user);
+  userRef.current = user;
+  const refreshRef = useRef(refreshAccess);
+  refreshRef.current = refreshAccess;
+  const hasUser = !!user;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!returning || !isLoaded || !hasUser || started.current) return;
+    started.current = true;
+    (async () => {
+      for (let attempt = 0; attempt < 15 && mounted.current; attempt++) {
+        if (sessionId) {
+          await fetch('/api/stripe/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId }),
+          }).catch(() => null);
+        }
+        const fresh = await userRef.current?.reload().catch(() => null);
+        const tier = fresh?.publicMetadata?.tier;
+        if (tier && tier !== 'free') break;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      if (!mounted.current) return;
+      await refreshRef.current();
+      setFinishing(false);
+      router.replace('/dashboard');
+    })();
+  }, [returning, isLoaded, hasUser, sessionId, router]);
+
+  return returning && finishing;
 }
 
 /** For inner pages: once the account is locked, send the member back to the dashboard. */

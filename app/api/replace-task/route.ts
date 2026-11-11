@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Task swapping is available on paid plans' }, { status: 403 });
   }
 
-  const body = await req.json() as {
+  const body = await req.json().catch(() => ({})) as {
     completedTask: ActionTask;
     property: PropertyProfile;
     existingTasks: ActionTask[];

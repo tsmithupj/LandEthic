@@ -48,9 +48,9 @@ export async function POST(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const body = (await req.json()) as CreatePropertyBody;
-  if (!body.profile || !body.plan) {
-    return NextResponse.json({ error: 'profile and plan are required' }, { status: 400 });
+  const body = (await req.json().catch(() => ({}))) as CreatePropertyBody;
+  if (!body.profile || !body.plan || !Array.isArray(body.plan.tasks) || body.plan.tasks.length === 0) {
+    return NextResponse.json({ error: 'profile and plan (with tasks) are required' }, { status: 400 });
   }
 
   const tier = await getUserTier();

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { getStripe, isInterval, planForPriceId, priceIdForTier, PAID_TIERS, type BillingInterval, type PaidTier } from '@/lib/stripe';
+import { getStripe, isInterval, planForPrice, planForPriceId, priceIdForTier, PAID_TIERS, type BillingInterval, type PaidTier } from '@/lib/stripe';
 import { getSubscriptionByClerkId, upsertSubscription } from '@/lib/db/subscriptions';
+import { setMemberTier } from '@/lib/billing';
 
 export async function GET() {
   const { userId } = await auth();
@@ -24,14 +25,22 @@ export async function PATCH(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const body = (await req.json()) as { tier: PaidTier; interval?: BillingInterval };
-  if (!PAID_TIERS.includes(body.tier)) {
+  const body = (await req.json().catch(() => ({}))) as { tier?: PaidTier; interval?: BillingInterval };
+  if (!body.tier || !PAID_TIERS.includes(body.tier)) {
     return NextResponse.json({ error: 'Invalid tier' }, { status: 400 });
   }
+  const newTier = body.tier;
 
   const row = await getSubscriptionByClerkId(userId);
   if (!row?.stripeSubscriptionId) {
     return NextResponse.json({ error: 'No active subscription' }, { status: 404 });
+  }
+  // A renewal payment is failing — the card needs fixing before changing plans
+  if (row.status !== 'active' && row.status !== 'trialing') {
+    return NextResponse.json(
+      { error: 'Your last payment didn\'t go through. Please update your card first.', paymentIssue: true },
+      { status: 409 },
+    );
   }
 
   const stripe = getStripe();
@@ -40,8 +49,8 @@ export async function PATCH(req: NextRequest) {
   // Keep the member's billing interval unless they asked to change it
   const interval: BillingInterval = isInterval(body.interval)
     ? body.interval
-    : planForPriceId(currentItem.price.id)?.interval ?? 'month';
-  const priceId = priceIdForTier(body.tier, interval);
+    : planForPrice(currentItem.price)?.interval ?? 'month';
+  const priceId = priceIdForTier(newTier, interval);
 
   await stripe.subscriptions.update(row.stripeSubscriptionId, {
     items: [{ id: currentItem.id, price: priceId }],
@@ -51,10 +60,12 @@ export async function PATCH(req: NextRequest) {
 
   await upsertSubscription({
     clerkUserId: userId,
-    tier: body.tier,
+    tier: newTier,
     stripePriceId: priceId,
     cancelAtPeriodEnd: false,
   });
+  // Show the new plan right away (the webhook confirms it a moment later)
+  await setMemberTier(userId, newTier);
 
   return NextResponse.json({ ok: true });
 }

@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const body = await req.json() as {
+  const body = await req.json().catch(() => ({})) as {
     task: ActionTask;
     property: PropertyProfile;
     userGoalsText?: string;

@@ -13,7 +13,7 @@ import type { ParcelLookupRequest, ParcelLookupResponse, ParcelBoundary } from '
  *   REGRID_API_KEY            -- for parcel lookup
  */
 export async function POST(req: NextRequest) {
-  const body: ParcelLookupRequest = await req.json();
+  const body = (await req.json().catch(() => ({}))) as ParcelLookupRequest;
 
   if (!body.address) {
     return NextResponse.json({ error: 'address is required' }, { status: 400 });

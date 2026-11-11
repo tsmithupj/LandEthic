@@ -13,7 +13,7 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   let charged: { userId: string; route: AiRoute } | null = null;
   try {
-    const body = (await req.json()) as {
+    const body = (await req.json().catch(() => ({}))) as {
       profile?: PropertyProfile;
       userGoalsText?: string;
       boundary?: number[][][];

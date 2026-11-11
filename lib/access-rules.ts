@@ -19,9 +19,26 @@ export interface AccessState {
   deleteAt: string | null;
   /** Whole days of access left (0 once locked). Null for active paid plans. */
   daysLeft: number | null;
+  /** Paid plan whose last renewal payment failed (Stripe is retrying). From /api/account/access only. */
+  paymentIssue?: boolean;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * When a member's paid access ended, from their saved subscription row.
+ *  - canceled: at the end of the last paid period
+ *  - unpaid (Stripe gave up on renewal but kept the subscription): when it went unpaid
+ *  - anything else (never subscribed, still paying, never completed a payment): null
+ */
+export function paidAccessEndFromSubscription(
+  sub: { status: string | null; currentPeriodEnd: Date | null; updatedAt: Date } | null | undefined,
+): Date | null {
+  if (!sub?.status) return null;
+  if (sub.status === 'canceled') return sub.currentPeriodEnd ?? sub.updatedAt;
+  if (sub.status === 'unpaid') return sub.updatedAt;
+  return null;
+}
 
 export function computeAccess(input: {
   tier: SubscriptionTier;

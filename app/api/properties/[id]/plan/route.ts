@@ -15,7 +15,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const owned = await getOwnedProperty(userId, propertyId);
   if (!owned) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const body = (await req.json()) as { plan: ActionPlan };
+  const body = (await req.json().catch(() => ({}))) as { plan: ActionPlan };
   if (!body.plan) return NextResponse.json({ error: 'plan is required' }, { status: 400 });
 
   const db = getDb();

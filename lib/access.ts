@@ -1,16 +1,20 @@
 import { clerkClient, currentUser } from '@clerk/nextjs/server';
 import { getSubscriptionByClerkId } from '@/lib/db/subscriptions';
-import { computeAccess, type AccessState } from '@/lib/access-rules';
+import { computeAccess, paidAccessEndFromSubscription, type AccessState } from '@/lib/access-rules';
 import type { SubscriptionTier } from '@/types';
 
 export type { AccessState };
 
-/** When a cancelled paid plan's access ended (null if they never paid or are still paying). */
-export async function paidAccessEndedAt(clerkUserId: string): Promise<Date | null> {
+/**
+ * When a member's paid plan ended (null if they never paid or are still paying).
+ * `strict` throws on a database error instead of returning null — the cleanup job
+ * uses it so a hiccup can never make a past subscriber look like a never-paid one.
+ */
+export async function paidAccessEndedAt(clerkUserId: string, opts: { strict?: boolean } = {}): Promise<Date | null> {
   try {
-    const sub = await getSubscriptionByClerkId(clerkUserId);
-    return sub?.status === 'canceled' && sub.currentPeriodEnd ? sub.currentPeriodEnd : null;
-  } catch {
+    return paidAccessEndFromSubscription(await getSubscriptionByClerkId(clerkUserId));
+  } catch (err) {
+    if (opts.strict) throw err;
     return null;
   }
 }

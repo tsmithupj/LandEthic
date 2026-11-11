@@ -16,7 +16,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!owned) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   // Either field may be sent: `completed` (checkbox) and/or `steps` (weekly checklist).
-  const body = (await req.json()) as { completed?: boolean; steps?: TaskStep[] };
+  const body = (await req.json().catch(() => ({}))) as { completed?: boolean; steps?: TaskStep[] };
   const hasCompleted = typeof body.completed === 'boolean';
   const steps = body.steps !== undefined ? cleanSteps(body.steps) : undefined;
   if (!hasCompleted && steps === undefined) {

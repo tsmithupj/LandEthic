@@ -93,8 +93,14 @@ function UpgradePageContent() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tier: tierId, interval }),
         });
-        if (!res.ok) throw new Error("Failed to start checkout");
-        const data = await res.json();
+        const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+        if (res.status === 409) {
+          // Already on a plan (e.g. paid in another tab) — show where things stand
+          await user?.reload();
+          await refreshBillingStatus();
+          throw new Error("You already have a plan — switch it below instead.");
+        }
+        if (!res.ok || !data.url) throw new Error(data.error ?? "Could not open checkout.");
         window.location.href = data.url;
         return;
       } else {
@@ -103,13 +109,17 @@ function UpgradePageContent() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tier: tierId, interval }),
         });
-        if (!res.ok) throw new Error("Failed to switch plan");
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? "Could not switch your plan.");
+        }
         await user?.reload();
         router.push("/dashboard");
         return;
       }
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (err) {
+      const msg = err instanceof Error && err.message ? err.message : "";
+      setError(msg && !msg.startsWith("Failed") ? msg : "Something went wrong. Please try again.");
     } finally {
       setLoading(null);
     }
