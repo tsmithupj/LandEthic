@@ -45,7 +45,8 @@ export const MONTHLY_ALLOWANCES: Record<AiRoute, Record<SubscriptionTier, number
   'refresh-insights': { free: 0,  steward: 1,  naturalist: 2,  conservationist: 3 },
   'rebuild-plan':     { free: 0,  steward: 1,  naturalist: 2,  conservationist: 3 },
   // Free with each step up — separate from rebuilds, and only possible while the plan is below the
-  // membership. Counted across steps, so Free → Steward → Naturalist → Conservationist fits in one month.
+  // membership. Counted PER PROPERTY (every property can be expanded), and across steps, so
+  // Free → Steward → Naturalist → Conservationist fits in one month.
   'plan-upgrade':     { free: 0,  steward: 1,  naturalist: 2,  conservationist: 3 },
   'monthly-update':   { free: 0,  steward: 0,  naturalist: 3,  conservationist: 5 },
   'habitat-plan':     { free: 0,  steward: 0,  naturalist: 0,  conservationist: 2 },
@@ -82,28 +83,43 @@ function formatDay(d: Date): string {
 }
 
 /** The friendly "you've used your allowance" message. */
-export function allowanceMessage(route: AiRoute, tier: SubscriptionTier, limit: number, nextOpens: Date | null): string {
+export function allowanceMessage(
+  route: AiRoute,
+  tier: SubscriptionTier,
+  limit: number,
+  nextOpens: Date | null,
+  forThisProperty = false,
+): string {
   const [one, many] = ACTION_LABEL[route];
   if (limit === 0) {
     return tier === 'free'
       ? `${many.charAt(0).toUpperCase() + many.slice(1)} are part of the paid plans. Pick a plan to unlock them.`
       : `${many.charAt(0).toUpperCase() + many.slice(1)} aren't included in the ${TIER_NAME[tier]} plan. Upgrade to unlock them.`;
   }
-  const used = `You've used ${limit === 1 ? `this month's ${one}` : `all ${limit} of this month's ${many}`} on the ${TIER_NAME[tier]} plan.`;
+  const where = forThisProperty ? ' for this property' : '';
+  const used = `You've used ${limit === 1 ? `this month's ${one}` : `all ${limit} of this month's ${many}`}${where} on the ${TIER_NAME[tier]} plan.`;
   const next = nextOpens ? ` Your next one opens up on ${formatDay(nextOpens)}.` : '';
   const upgrade = tier === 'conservationist' ? '' : ' Upgrading your plan gives you more.';
   return `${used}${next}${upgrade}`;
+}
+
+/** What's stored in ai_usage.route: the feature, plus the property when it's counted per property. */
+function usageKey(route: AiRoute, propertyId?: string): string {
+  return propertyId ? `${route}:${propertyId}` : route;
 }
 
 /**
  * Check (and record) one AI request. Returns `null` when it may go ahead, or a
  * ready-to-return response: 402 when the account is locked, 429 when the
  * member has used their allowance.
+ *
+ * Pass `propertyId` to count the allowance per property instead of per member.
  */
 export async function enforceAiLimit(
   clerkUserId: string,
   route: AiRoute,
   tier: SubscriptionTier,
+  propertyId?: string,
 ): Promise<NextResponse | null> {
   // Free plan (or a cancelled plan) has ended → nothing AI until they pick a plan
   const access = await getAccess(clerkUserId, tier);
@@ -125,15 +141,16 @@ export async function enforceAiLimit(
   try {
     const db = getDb();
     const since = new Date(Date.now() - WINDOW_MS);
+    const key = usageKey(route, propertyId);
     const where = and(
       eq(aiUsage.clerkUserId, clerkUserId),
-      eq(aiUsage.route, route),
+      eq(aiUsage.route, key),
       gte(aiUsage.createdAt, since),
     );
 
     // Record this use first, then count the uses that came before it. Two requests
     // sent at the same moment can't both squeeze into the last spot this way.
-    const [mine] = await db.insert(aiUsage).values({ clerkUserId, route }).returning({ id: aiUsage.id });
+    const [mine] = await db.insert(aiUsage).values({ clerkUserId, route: key }).returning({ id: aiUsage.id });
     const [row] = await db
       .select({ n: count() })
       .from(aiUsage)
@@ -154,7 +171,7 @@ export async function enforceAiLimit(
         .limit(1);
       const nextOpens = oldest ? new Date(oldest.createdAt.getTime() + WINDOW_MS) : null;
       return NextResponse.json(
-        { error: allowanceMessage(route, tier, limit, nextOpens), limit, used, nextOpens },
+        { error: allowanceMessage(route, tier, limit, nextOpens, !!propertyId), limit, used, nextOpens },
         { status: 429 },
       );
     }
@@ -167,8 +184,8 @@ export async function enforceAiLimit(
   }
 }
 
-/** Give back the use recorded by `enforceAiLimit` when the AI call failed. */
-export async function releaseAiUsage(clerkUserId: string, route: AiRoute): Promise<void> {
+/** Give back the use recorded by `enforceAiLimit` when the AI call failed (same `propertyId`, if any). */
+export async function releaseAiUsage(clerkUserId: string, route: AiRoute, propertyId?: string): Promise<void> {
   try {
     const db = getDb();
     const [latest] = await db
@@ -176,7 +193,7 @@ export async function releaseAiUsage(clerkUserId: string, route: AiRoute): Promi
       .from(aiUsage)
       .where(and(
         eq(aiUsage.clerkUserId, clerkUserId),
-        eq(aiUsage.route, route),
+        eq(aiUsage.route, usageKey(route, propertyId)),
         gte(aiUsage.createdAt, new Date(Date.now() - 15 * 60 * 1000)),
       ))
       .orderBy(desc(aiUsage.createdAt))

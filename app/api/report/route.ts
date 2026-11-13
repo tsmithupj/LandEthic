@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
   const report = { clerkUserId: userId, email, tier, page: clip(body.page, 300), message, error, details, ip };
   const id = await saveReport(report);
-  const emailed = await emailReport(report, id);
+  const emailed = await emailReport(report, id, req.nextUrl.origin);
   // Always in the server log too, so nothing is lost even if the database or email is down
   console.error('[problem-report]', JSON.stringify({ id, emailed, email, tier, page: report.page, error, message }));
 

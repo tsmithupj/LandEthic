@@ -47,7 +47,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const body = (await req.json().catch(() => ({}))) as { userGoalsText?: unknown };
-  const limited = await enforceAiLimit(userId, 'plan-upgrade', tier);
+  // Counted per property, so members with several properties can expand every one
+  const limited = await enforceAiLimit(userId, 'plan-upgrade', tier, propertyId);
   if (limited) return limited;
 
   // What they already finished stays on the plan — the new tasks build on it
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return { plan: saved, saved: true };
     } catch (err) {
       console.error('[upgrade-plan] error:', err instanceof Error ? err.message : err);
-      await releaseAiUsage(userId, 'plan-upgrade');
+      await releaseAiUsage(userId, 'plan-upgrade', propertyId);
       return { error: 'We could not expand your plan just now. Please try again in a minute.' };
     }
   })();

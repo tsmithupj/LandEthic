@@ -9,7 +9,8 @@ import { Icon, Spinner } from '@/components/brand';
 interface Activity { at: string; what: string }
 const recent: Activity[] = [];
 function remember(what: string) {
-  recent.push({ at: new Date().toISOString().slice(11, 19), what: what.slice(0, 300) });
+  // Full time (UTC); the report email shows it in the owner's time zone
+  recent.push({ at: new Date().toISOString(), what: what.slice(0, 300) });
   if (recent.length > 15) recent.shift();
 }
 
