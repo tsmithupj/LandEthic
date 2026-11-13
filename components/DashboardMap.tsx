@@ -5,6 +5,7 @@ import type { GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 import { Icon } from '@/components/brand';
 import { ReportLink } from '@/components/ReportProblem';
 import { clipToProperty, shapeCenter, shapePoints } from '@/lib/geo';
+import { locateAddress } from '@/lib/places';
 
 interface DashboardMapProps {
   boundary: number[][][] | null;
@@ -183,15 +184,9 @@ function DashboardMapInner({
 
   // ── Geocode fallback if no boundary ─────────────────────────────────────
   async function geocodeAddress(token: string): Promise<[number, number]> {
-    try {
-      const res = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${token}&types=address,place&limit=1`
-      );
-      const data = await res.json();
-      return data.features?.[0]?.center ?? [-87.08, 35.61];
-    } catch {
-      return [-87.08, 35.61];
-    }
+    // Handles GPS-coordinate addresses too, e.g. "39.84120, -78.95000 (near Berlin, PA)"
+    const spot = await locateAddress(address, token);
+    return spot ? [spot.lng, spot.lat] : [-87.08, 35.61];
   }
 
   // ── Fly-around animation ────────────────────────────────────────────────

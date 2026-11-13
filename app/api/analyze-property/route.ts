@@ -7,25 +7,9 @@ import { getOwnedProperty } from '@/lib/db/ownership';
 import { enforceAiLimit, releaseAiUsage, type AiRoute } from '@/lib/rate-limit';
 import { fetchSatelliteSnapshot, ringFromPixels } from '@/lib/satellite';
 import { keepAliveJson } from '@/lib/keep-alive';
+import { cleanLocation, locateAddress } from '@/lib/places';
 
 export const maxDuration = 120;
-
-// ─── Geocode address → lat/lng via Mapbox ─────────────────────────────────
-async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
-  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-  if (!token) return null;
-  try {
-    const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${token}&types=address,place&limit=1`
-    );
-    const data = await res.json();
-    const [lng, lat] = data.features?.[0]?.center ?? [];
-    if (!lat || !lng) return null;
-    return { lat, lng };
-  } catch {
-    return null;
-  }
-}
 
 // ─── USDA hardiness zone from lat/lng ─────────────────────────────────────
 async function getHardinessZone(lat: number, lng: number): Promise<string | null> {
@@ -99,13 +83,16 @@ export async function POST(req: NextRequest) {
     // The AI part can take a minute or more — keep the connection alive while it works
     const work = (async () => {
       try {
-        // Parse county/state from address (best-effort)
-        const parts  = body.address.split(',').map((s) => s.trim());
-        const state  = parts[parts.length - 1]?.replace(/\d+/g, '').trim();
-        const county = parts[parts.length - 2]?.trim();
+        // Where the land is: the exact spot the member picked (suggestion or GPS
+        // coordinates), otherwise the best match for the address text
+        const spot = cleanLocation((body as { location?: unknown }).location)
+          ?? await locateAddress(body.address, process.env.NEXT_PUBLIC_MAPBOX_TOKEN);
+        const coords = spot ? { lat: spot.lat, lng: spot.lng } : null;
 
-        // Enrich with real location data
-        const coords = await geocodeAddress(body.address);
+        // County and state: from the map lookup when we have them, else a best guess from the text
+        const parts  = body.address.split(',').map((s) => s.trim());
+        const state  = spot?.state ?? parts[parts.length - 1]?.replace(/\d+/g, '').trim();
+        const county = spot?.county ?? parts[parts.length - 2]?.trim();
         const hasBoundary = (body.boundary?.[0]?.length ?? 0) >= 3;
         const [hardinessZone, soilData, satellite] = await Promise.all([
           coords ? getHardinessZone(coords.lat, coords.lng) : null,

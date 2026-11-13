@@ -4,15 +4,19 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Map as MapboxMap, MapMouseEvent } from 'mapbox-gl';
 import type { Feature } from 'geojson';
 import { Icon } from '@/components/brand';
+import { locateAddress } from '@/lib/places';
 
 interface DrawablePropertyMapProps {
   address: string;
+  /** Exact spot [lng, lat] when known (picked suggestion or GPS coordinates) — skips the address lookup. */
+  center?: [number, number];
   onBoundaryChange?: (boundary: number[][][] | null, acreage: number) => void;
   className?: string;
 }
 
 export default function DrawablePropertyMap({
   address,
+  center: knownCenter,
   onBoundaryChange,
   className = '',
 }: DrawablePropertyMapProps) {
@@ -89,19 +93,12 @@ export default function DrawablePropertyMap({
     let map: MapboxMap;
 
     (async () => {
-      // 1. Geocode address → center
-      let center: [number, number] = [-87.08, 35.61];
-      try {
-        const res = await fetch(
-          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
-            address
-          )}.json?access_token=${token}&types=address,place&limit=1`
-        );
-        const data = await res.json();
-        if (data.features?.[0]?.center) {
-          center = data.features[0].center as [number, number];
-        }
-      } catch { /* use fallback */ }
+      // 1. Where to start: the exact spot if we have it, otherwise look up the address
+      let center: [number, number] = knownCenter ?? [-87.08, 35.61];
+      if (!knownCenter) {
+        const spot = await locateAddress(address, token);
+        if (spot) center = [spot.lng, spot.lat];
+      }
       setGeocoding(false);
 
       // 2. Init map
@@ -184,7 +181,7 @@ export default function DrawablePropertyMap({
 
     return () => { map?.remove(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address]);
+  }, [address, knownCenter?.[0], knownCenter?.[1]]);
 
   // ── Undo / Clear ──────────────────────────────────────────────────────────
   const handleUndo = () => {

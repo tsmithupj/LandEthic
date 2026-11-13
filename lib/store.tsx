@@ -12,6 +12,7 @@ import { useUser } from '@clerk/nextjs';
 import type { PropertyProfile, ActionPlan, ActionTask, Goal, SubscriptionTier, TaskStep } from '@/types';
 import { monthKey, monthNumOf } from '@/lib/months';
 import type { AccessState } from '@/lib/access-rules';
+import type { PlaceLocation } from '@/lib/places';
 
 import { TIER_PROPERTY_LIMITS } from '@/lib/tiers';
 
@@ -103,6 +104,8 @@ interface LandEthicStore {
 
   // Onboarding inputs for the property currently being created
   address:  string;
+  /** Exact spot picked from the address suggestions or typed as GPS coordinates. */
+  location: PlaceLocation | null;
   acreage:  string;
   goals:    Goal[];
   boundary: number[][][] | null;
@@ -128,6 +131,7 @@ interface LandEthicStore {
 
   // Setters for onboarding inputs
   setAddress:  (v: string) => void;
+  setLocation: (v: PlaceLocation | null) => void;
   setAcreage:  (v: string) => void;
   setGoals:         (v: Goal[]) => void;
   userGoalsText:    string;
@@ -178,6 +182,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // Onboarding inputs
   const [address,  setAddress]  = useState('');
+  const [location, setLocation] = useState<PlaceLocation | null>(null);
   const [acreage,  setAcreage]  = useState('');
   const [goals,    setGoals]    = useState<Goal[]>(['wildlife_diversity', 'deer_hunting']);
   const [userGoalsText, setUserGoalsText] = useState('');
@@ -223,6 +228,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (raw) {
         const saved = JSON.parse(raw);
         if (saved.address)       setAddress(saved.address);
+        if (saved.location)      setLocation(saved.location);
         if (saved.acreage)       setAcreage(saved.acreage);
         if (saved.goals)         setGoals(saved.goals);
         if (saved.userGoalsText) setUserGoalsText(saved.userGoalsText);
@@ -241,12 +247,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.setItem(
         storageKey(userId),
-        JSON.stringify({ address, acreage, goals, userGoalsText })
+        JSON.stringify({ address, location, acreage, goals, userGoalsText })
       );
     } catch {
       // ignore
     }
-  }, [isLoaded, userId, hydratedFor, address, acreage, goals, userGoalsText]);
+  }, [isLoaded, userId, hydratedFor, address, location, acreage, goals, userGoalsText]);
 
   // Load saved properties from the server (source of truth — replaces localStorage)
   useEffect(() => {
@@ -285,6 +291,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         '/api/analyze-property',
         {
           address,
+          location: location ?? undefined,
           acreage: acreage ? parseFloat(acreage) : undefined,
           goals,
           userGoalsText: userGoalsText || undefined,
@@ -333,7 +340,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setIsAnalyzing(false);
       setAnalyzeStage('idle');
     }
-  }, [address, acreage, goals, userGoalsText, boundary, tier]);
+  }, [address, location, acreage, goals, userGoalsText, boundary, tier]);
 
   // Mark a task complete
 
@@ -664,6 +671,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Clear onboarding inputs (start a new analysis)
   const reset = useCallback(() => {
     setAddress('');
+    setLocation(null);
     setAcreage('');
     setGoals(['wildlife_diversity', 'deer_hunting']);
     setUserGoalsText('');
@@ -676,6 +684,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setPropertyEntries([]);
     setActivePropertyId(null);
     setAddress('');
+    setLocation(null);
     setAcreage('');
     setGoals(['wildlife_diversity', 'deer_hunting']);
     setUserGoalsText('');
@@ -690,6 +699,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         propertyEntries,
         activePropertyId,
         address, setAddress,
+        location, setLocation,
         acreage, setAcreage,
         goals,   setGoals,
         userGoalsText, setUserGoalsText,

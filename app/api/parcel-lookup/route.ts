@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { ParcelLookupRequest, ParcelLookupResponse, ParcelBoundary } from '@/types';
+import { cleanLocation, locateAddress } from '@/lib/places';
 
 /**
  * POST /api/parcel-lookup
  *
- * Geocodes the address with Mapbox, then calls the Regrid API for a parcel
+ * Uses the exact spot sent by the address box ({ lat, lng }), or geocodes the
+ * address with Mapbox, then calls the Regrid API for a parcel
  * boundary polygon. Returns { parcels, ownerMatch } or { parcels: [] } if
  * nothing is found.
  *
@@ -13,7 +15,7 @@ import type { ParcelLookupRequest, ParcelLookupResponse, ParcelBoundary } from '
  *   REGRID_API_KEY            -- for parcel lookup
  */
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => ({}))) as ParcelLookupRequest;
+  const body = (await req.json().catch(() => ({}))) as ParcelLookupRequest & { lat?: unknown; lng?: unknown };
 
   if (!body.address) {
     return NextResponse.json({ error: 'address is required' }, { status: 400 });
@@ -22,34 +24,24 @@ export async function POST(req: NextRequest) {
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   const regridToken = process.env.REGRID_API_KEY;
 
-  // Step 1: Geocode the address with Mapbox
-  let lat: number;
-  let lng: number;
-
-  try {
-    const geoUrl =
-      'https://api.mapbox.com/geocoding/v5/mapbox.places/' +
-      encodeURIComponent(body.address) +
-      '.json?access_token=' + mapboxToken +
-      '&limit=1&types=address,poi';
-    const geoRes = await fetch(geoUrl);
-    if (!geoRes.ok) throw new Error('Geocoding failed');
-    const geoData = await geoRes.json();
-    const [feature] = geoData.features ?? [];
-    if (!feature) throw new Error('Address not found');
-    [lng, lat] = feature.center as [number, number];
-  } catch (err) {
-    console.error('[parcel-lookup] geocoding error:', err);
-    return NextResponse.json({ parcels: [], ownerMatch: false } satisfies ParcelLookupResponse);
-  }
-
-  // Step 2: Call Regrid for parcel data
+  // No Regrid key → nothing to look up (onboarding falls back to drawing)
   if (!regridToken) {
     // No Regrid key configured -- return empty so onboarding falls back to manual draw
     console.warn('[parcel-lookup] REGRID_API_KEY not set -- skipping parcel lookup');
     return NextResponse.json({ parcels: [], ownerMatch: false } satisfies ParcelLookupResponse);
   }
 
+  // Step 1: Where the land is — the exact spot from the address box (a picked
+  // suggestion or GPS coordinates), otherwise look up the address text
+  const sent = cleanLocation(body);
+  const spot = sent ?? await locateAddress(body.address, mapboxToken);
+  if (!spot) {
+    console.error('[parcel-lookup] could not find the address');
+    return NextResponse.json({ parcels: [], ownerMatch: false } satisfies ParcelLookupResponse);
+  }
+  const { lat, lng } = spot;
+
+  // Step 2: Ask Regrid for the parcel at that spot
   try {
     const regridUrl =
       'https://app.regrid.com/api/v1/query.json?lat=' + lat +

@@ -4,6 +4,8 @@ import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/lib/store';
 import DrawablePropertyMap from '@/components/DrawablePropertyMap';
+import AddressSearch from '@/components/AddressSearch';
+import { locateAddress, type Place } from '@/lib/places';
 import dynamic from 'next/dynamic';
 import type { Goal } from '@/types';
 import { TIER_LABELS } from '@/lib/pricing';
@@ -75,7 +77,19 @@ interface StepAddressProps {
 }
 
 function StepAddress({ onNext, loading }: StepAddressProps) {
-  const { address, setAddress, acreage, setAcreage } = useStore();
+  const { address, setAddress, location, setLocation, acreage, setAcreage } = useStore();
+  // The suggestion they picked (for the confirmation line); falls back to the saved spot
+  const [pickedPlace, setPickedPlace] = useState<Place | null>(null);
+  const picked: Place | null = location
+    ? pickedPlace?.address === address
+      ? pickedPlace
+      : { ...location, id: 'saved', label: address, detail: '', address, kind: 'saved' }
+    : null;
+  const where = picked
+    ? picked.kind === 'coordinates'
+      ? picked.detail
+      : [picked.county ? `${picked.county} County` : null, picked.state].filter(Boolean).join(', ')
+    : '';
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (address.trim() && !loading) onNext(); }}>
@@ -91,15 +105,33 @@ function StepAddress({ onNext, loading }: StepAddressProps) {
           <label htmlFor="address" className="mb-1.5 block text-sm font-semibold text-ink">
             Property address
           </label>
-          <input
+          <AddressSearch
             id="address"
-            type="text"
             value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="123 Rural Route, Maury County, TN 38401"
-            autoComplete="street-address"
+            onChange={(text) => {
+              setAddress(text);
+              // Typing again means the picked spot no longer matches
+              if (location) setLocation(null);
+            }}
+            onPick={(place) => {
+              setPickedPlace(place);
+              setAddress(place.address);
+              setLocation({ lng: place.lng, lat: place.lat, county: place.county, state: place.state });
+            }}
+            picked={picked}
             className={inputClass}
           />
+          {picked ? (
+            <p className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-forest-700">
+              <Icon.Check size={13} /> Got it{where ? ` — ${where}` : ''}. The map will start right there.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-xs leading-relaxed text-ink-faint">
+              Pick your address from the list as you type. No street address for your land? Paste its GPS
+              coordinates instead, like <span className="whitespace-nowrap font-medium text-ink-soft">40.44062, -79.99589</span>{' '}
+              (in Google Maps, press and hold on your land to copy them).
+            </p>
+          )}
         </div>
         <div>
           <label htmlFor="acreage" className="mb-1.5 block text-sm font-semibold text-ink">
@@ -150,7 +182,7 @@ interface StepBoundaryProps {
 }
 
 function StepBoundary({ onNext, onBack, suggested, mismatch }: StepBoundaryProps) {
-  const { address: storeAddress, acreage, setAcreage, boundary, setBoundary } = useStore();
+  const { address: storeAddress, location, acreage, setAcreage, boundary, setBoundary } = useStore();
 
   // If we have a suggested boundary and no mismatch, start in confirm mode.
   // Otherwise go straight to draw mode.
@@ -234,6 +266,7 @@ function StepBoundary({ onNext, onBack, suggested, mismatch }: StepBoundaryProps
 
       <DrawablePropertyMap
         address={storeAddress}
+        center={location ? [location.lng, location.lat] : undefined}
         onBoundaryChange={handleBoundaryChange}
         className="mb-5"
       />
@@ -414,7 +447,7 @@ function PropertyLimitWall({ tier }: { tier: keyof typeof TIER_LABELS }) {
 export default function OnboardingPage() {
   const router = useRouter();
   const {
-    address, acreage,
+    address, acreage, location, setLocation,
     analyzeAndPlan, analyzeError, isAnalyzing, analyzeStage,
     tier, canAddProperty, access,
   } = useStore();
@@ -436,10 +469,16 @@ export default function OnboardingPage() {
     setSuggested(null);
     setMismatch(false);
     try {
+      // Didn't pick a suggestion? Find the best match for what they typed.
+      let spot = location;
+      if (!spot) {
+        spot = await locateAddress(address, process.env.NEXT_PUBLIC_MAPBOX_TOKEN);
+        if (spot) setLocation(spot);
+      }
       const res = await fetch('/api/parcel-lookup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address }),
+        body: JSON.stringify({ address, ...(spot ? { lat: spot.lat, lng: spot.lng } : {}) }),
       });
       const data = await res.json();
       const firstParcel = data?.parcels?.[0];
