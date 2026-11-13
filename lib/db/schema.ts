@@ -72,6 +72,8 @@ export const tasks = pgTable('tasks', {
     placement?: string;
     photoPrompt?: string;
     impactNote?: string;
+    timeNeeded?: string;
+    costEstimate?: string;
   }>(),
   tags: jsonb('tags').$type<string[]>().notNull().default([]),
   month: text('month'),

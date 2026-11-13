@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
   // Satellite photo so the new task points to a real spot on the land
   const satellite = (body.boundary?.[0]?.length ?? 0) >= 3 ? await fetchSatelliteSnapshot(body.boundary) : null;
 
+  const detailed = tier === 'naturalist' || tier === 'conservationist';
   const prompt = `The landowner has already completed this task on their property:
 "${completedTask.title}"
 
@@ -92,8 +93,8 @@ Return ONLY this JSON (no markdown):
   "month": "${month}",
   "season": "${season}",
   "tier": "${tier}",${tier === 'conservationist' ? `
-  "week": ${Math.min(4, Math.ceil(new Date().getDate() / 7))},
-  "steps": ["3–6 short check-off steps, in order, each a single action with amounts or sizes where it helps"],` : ''}
+  "week": ${Math.min(4, Math.ceil(new Date().getDate() / 7))},` : ''}${detailed ? `
+  "steps": ["${tier === 'conservationist' ? '3–6' : '3–5'} short how-to steps, in order, each a single action with amounts or sizes where it helps"],` : ''}
   "completed": false,
   "propertyId": "${property.id}",
   "locationDescription": "2-4 sentences describing exactly where on the property this task takes place. Start from something the owner can see (house, barn, driveway, road, pond, tree line) and give a compass direction and rough distance from it.",
@@ -101,7 +102,10 @@ Return ONLY this JSON (no markdown):
     "species": [],
     "materials": [],
     "dimensions": "",
-    "placement": ""
+    "placement": ""${detailed ? `,
+    "impactNote": "one sentence on how this task improves land health",
+    "timeNeeded": "short hands-on time estimate, e.g. About 2 hours",
+    "costEstimate": "short supply cost in US dollars, e.g. $40–60 for seed, or Free"` : ''}
   }${satellite ? `,
   "areaPixels": [[x, y], [x, y], [x, y], [x, y]]` : ''}
 }${satellite ? `

@@ -249,9 +249,9 @@ export default function TaskDetailPage() {
           </div>
         </div>
 
-        {/* Weekly checklist steps (Conservationist) */}
+        {/* Step-by-step how-to (Naturalist) / weekly checklist steps (Conservationist) */}
         {task.steps?.length ? (
-          <Section icon={<Icon.Check size={15} />} title={`Checklist · ${task.steps.filter((st) => st.done).length} of ${task.steps.length} done`}>
+          <Section icon={<Icon.Check size={15} />} title={`Step by step · ${task.steps.filter((st) => st.done).length} of ${task.steps.length} done`}>
             <StepList task={task} />
             <p className="mt-3 text-xs text-ink-faint">Check off every step and the task is marked done for you.</p>
           </Section>
@@ -292,6 +292,22 @@ export default function TaskDetailPage() {
         {task.recommendations && (
           <Section icon={<Icon.Sprout size={16} />} title="What to do">
             <div className="space-y-3 text-sm text-ink-soft">
+              {(task.recommendations.timeNeeded || task.recommendations.costEstimate) && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {task.recommendations.timeNeeded && (
+                    <div className="rounded-lg border border-paper-line bg-cream-2 px-3 py-2">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-ink-faint">Time it takes</p>
+                      <p className="mt-0.5 font-semibold text-ink">{task.recommendations.timeNeeded}</p>
+                    </div>
+                  )}
+                  {task.recommendations.costEstimate && (
+                    <div className="rounded-lg border border-paper-line bg-cream-2 px-3 py-2">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-ink-faint">Rough cost</p>
+                      <p className="mt-0.5 font-semibold text-ink">{task.recommendations.costEstimate}</p>
+                    </div>
+                  )}
+                </div>
+              )}
               {task.recommendations.species?.length ? (
                 <div>
                   <span className="font-semibold text-ink">Recommended species: </span>

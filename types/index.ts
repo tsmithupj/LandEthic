@@ -84,6 +84,8 @@ export interface ActionTask {
     placement?: string;
     photoPrompt?: string;   // Steward+: what to photograph for species ID
     impactNote?: string;    // Naturalist+: how this task moves the land health score
+    timeNeeded?: string;    // Naturalist+: hands-on time, e.g. "About 2 hours"
+    costEstimate?: string;  // Naturalist+: supply cost, e.g. "$40–60 for seed"
   };
 }
 

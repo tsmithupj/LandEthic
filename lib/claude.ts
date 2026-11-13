@@ -188,16 +188,22 @@ interface PlanInput {
   userGoalsText?: string;
   currentMonth?: string;
   currentSeason?: string;
+  /** Tasks the owner already finished (plan upgrades keep them) — build on these, never repeat them. */
+  completedTitles?: string[];
 }
 
 // Weekly checklist rules (Conservationist): every task gets a week and small check-off steps.
 const WEEKLY_RULES = `Weekly checklist: give every task a "week" (1, 2, 3, or 4 — the week of its month to do it). Spread each month's tasks across the 4 weeks (1–2 per week), putting anything time-sensitive or prep work first. Give every task 3–6 "steps": short check-off items in the order they are done, each one a single action with amounts or sizes where it helps (e.g. "Buy 50 lbs of Durana white clover seed", "Disk the plot twice, 4 inches deep").`;
 
+// Naturalist and up: every task comes with how-to steps, and the time and money it takes.
+export const HOW_TO_STEPS = `Give every task 3–5 "steps": short how-to actions in the order they are done, each one a single action with amounts or sizes where it helps (e.g. "Mow the plot down to 3 inches", "Spread 2 bags of pelletized lime").`;
+export const TIME_AND_COST = `In "recommendations" add "timeNeeded" (honest hands-on time, e.g. "About 2 hours" or "Two weekend mornings") and "costEstimate" (rough out-of-pocket cost in US dollars for supplies, e.g. "$40–60 for seed and lime", or "Free — tools you likely own"). Keep both short.`;
+
 const TIER_DEPTH: Record<SubscriptionTier, string> = {
   free: 'Generate exactly 5 tasks covering the next 30 days. Simple, one-time actions. All tasks must have tier: "free".',
   steward: 'You MUST generate at least 12 tasks (target 14), one task per month across all 4 seasons of the year. Divide them: 3 Spring, 3 Summer, 4 Fall, 4 Winter. Set each task\'s "season" to its season and "month" to a specific month within that season (e.g., "March 2026" for Spring). For each task include a "photoPrompt" in recommendations: one sentence on what to photograph for species ID. All tasks must have tier: "steward".',
-  naturalist: 'You MUST generate exactly 18 tasks — exactly 3 tasks per month for each of the next 6 consecutive months starting from the current month. Set each task\'s "month" field to its exact calendar month (e.g., "June 2026", "July 2026", "August 2026"). Sort all tasks chronologically by month. Include an "impactNote" in recommendations for every task. All tasks must have tier: "naturalist". IMPORTANT: do not stop after 5 tasks. The full response must contain 18 task objects.',
-  conservationist: `You MUST generate exactly 21 tasks — exactly 7 tasks per month for each of the next 3 consecutive months starting from the current month. Set "month" to the exact calendar month. For food plot tasks add specific seed variety names, seeding rates (lbs/acre), and planting windows to recommendations.species. For nesting box tasks add exact height (feet), compass direction, and distance from tree line to recommendations.placement. Include an "impactNote" for every task. ${WEEKLY_RULES} All tasks must have tier: "conservationist". IMPORTANT: do not stop early. All 21 task objects must be in the response.`,
+  naturalist: `You MUST generate exactly 18 tasks — exactly 3 tasks per month for each of the next 6 consecutive months starting from the current month. Set each task's "month" field to its exact calendar month (e.g., "June 2026", "July 2026", "August 2026"). Sort all tasks chronologically by month. Include an "impactNote" in recommendations for every task. ${HOW_TO_STEPS} ${TIME_AND_COST} All tasks must have tier: "naturalist". IMPORTANT: do not stop after 5 tasks. The full response must contain 18 task objects.`,
+  conservationist: `You MUST generate exactly 21 tasks — exactly 7 tasks per month for each of the next 3 consecutive months starting from the current month. Set "month" to the exact calendar month. For food plot tasks add specific seed variety names, seeding rates (lbs/acre), and planting windows to recommendations.species. For nesting box tasks add exact height (feet), compass direction, and distance from tree line to recommendations.placement. Include an "impactNote" for every task. ${WEEKLY_RULES} ${TIME_AND_COST} All tasks must have tier: "conservationist". IMPORTANT: do not stop early. All 21 task objects must be in the response.`,
 };
 
 /** JSON shape of one task, shared by plan generation and the monthly update. */
@@ -208,6 +214,7 @@ function taskSchema({ tier, propertyId, withArea, monthHint }: {
   monthHint?: string;
 }): string {
   const weekly = tier === 'conservationist';
+  const detailed = tier === 'naturalist' || tier === 'conservationist';
   return `{
       "id": "task-{n}",
       "title": "clear action title (verb + what + where)",
@@ -223,8 +230,8 @@ function taskSchema({ tier, propertyId, withArea, monthHint }: {
       "tags": ["2–4 short tags"],
       "month": "${monthHint ?? 'the specific target month for this task (e.g. June 2026) — use the correct month based on seasonal timing'}",
       "season": "the season of this task's month: Spring, Summer, Fall, or Winter",${weekly ? `
-      "week": number 1–4 (the week of its month to do this task),
-      "steps": ["3–6 short check-off steps, in order"],` : ''}
+      "week": number 1–4 (the week of its month to do this task),` : ''}${detailed ? `
+      "steps": ["${weekly ? '3–6' : '3–5'} short how-to steps, in order"],` : ''}
       "tier": "${tier}",
       "completed": false,
       "propertyId": "${propertyId}",
@@ -235,7 +242,9 @@ function taskSchema({ tier, propertyId, withArea, monthHint }: {
         "dimensions": "size/area info if applicable, else omit",
         "placement": "specific placement guidance if applicable, else omit",
         "photoPrompt": "Steward/above only: what to photograph for species ID — omit for free tier",
-        "impactNote": "Naturalist/above only: one sentence on how this task improves land health score — omit for free/steward"
+        "impactNote": "Naturalist/above only: one sentence on how this task improves land health score — omit for free/steward"${detailed ? `,
+        "timeNeeded": "short hands-on time estimate",
+        "costEstimate": "short supply cost estimate in US dollars"` : ''}
       }${withArea ? `,
       "areaPixels": [[x, y], [x, y], [x, y], [x, y]]` : ''}
     }`;
@@ -309,7 +318,10 @@ ${propertyBlock(profile, input.userGoalsText)}
 ${withPhoto ? `
 ${photoIntro(!!input.hasBoundary)}
 ` : ''}
-TIER INSTRUCTIONS: ${TIER_DEPTH[tier]}
+${input.completedTitles?.length ? `TASKS THEY HAVE ALREADY FINISHED (they stay on their plan — never repeat these; where it fits, the next step after one of them is a great task):
+${input.completedTitles.slice(0, 40).map((t) => `- ${t}`).join('\n')}
+
+` : ''}TIER INSTRUCTIONS: ${TIER_DEPTH[tier]}
 
 Return ONLY this JSON (no markdown):
 {
@@ -396,7 +408,7 @@ ${list(input.upcomingTitles)}
 WHAT TO WRITE:
 1. "note": 2–3 short sentences for the top of their dashboard. Say what their finished work set up, and the one or two things that matter most in ${input.currentMonth} on this land. Warm and plain, like a neighbor checking in. If they finished nothing yet, be encouraging, not guilty.
 2. "tasks": ${total > 0
-    ? `exactly ${total} new tasks${input.newMonths.length === 1 ? ` for ${input.newMonths[0]}` : ` — exactly ${input.perMonth} for each of these months: ${input.newMonths.join(', ')}`}. Set "month" to that exact month label. Build on what they finished (the next step after it), fill gaps toward their goals, and fit the season. Never repeat a finished, moved, or already-planned task. Include an "impactNote" in recommendations for every task.${tier === 'conservationist' ? ` ${WEEKLY_RULES}` : ''} All tasks must have tier: "${tier}".`
+    ? `exactly ${total} new tasks${input.newMonths.length === 1 ? ` for ${input.newMonths[0]}` : ` — exactly ${input.perMonth} for each of these months: ${input.newMonths.join(', ')}`}. Set "month" to that exact month label. Build on what they finished (the next step after it), fill gaps toward their goals, and fit the season. Never repeat a finished, moved, or already-planned task. Include an "impactNote" in recommendations for every task. ${tier === 'conservationist' ? WEEKLY_RULES : HOW_TO_STEPS} ${TIME_AND_COST} All tasks must have tier: "${tier}".`
     : 'an empty array — their plan already covers the coming months.'}
 
 Return ONLY this JSON (no markdown):

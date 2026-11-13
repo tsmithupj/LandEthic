@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb } from './client';
 import { plans, tasks } from './schema';
 import { toActionPlan, toTaskInsert } from './mappers';
@@ -27,5 +27,31 @@ export async function replacePlan(propertyId: string, plan: Pick<ActionPlan, 'ti
 
   const [savedPlan] = await db.select().from(plans).where(eq(plans.id, existingPlan.id));
   const savedTasks = await db.select().from(tasks).where(eq(tasks.planId, existingPlan.id));
+  return toActionPlan(propertyId, savedPlan, savedTasks);
+}
+
+/**
+ * Expand a plan after the member moves up to a bigger membership: keep every task
+ * they already finished, replace the unfinished ones with the new plan's tasks.
+ */
+export async function upgradePlan(
+  propertyId: string,
+  planId: string,
+  plan: Pick<ActionPlan, 'tier' | 'summary' | 'tasks'>,
+): Promise<ActionPlan> {
+  if (!Array.isArray(plan.tasks) || plan.tasks.length === 0) throw new Error('The new plan has no tasks');
+
+  const db = getDb();
+  await db.batch([
+    db.delete(tasks).where(and(eq(tasks.planId, planId), eq(tasks.completed, false))),
+    db
+      .update(plans)
+      .set({ tier: plan.tier, summary: plan.summary, generatedAt: new Date(), lastMonthlyUpdate: null, monthlyNote: null })
+      .where(eq(plans.id, planId)),
+    db.insert(tasks).values(plan.tasks.map((t) => toTaskInsert(t, planId, propertyId))),
+  ]);
+
+  const [savedPlan] = await db.select().from(plans).where(eq(plans.id, planId));
+  const savedTasks = await db.select().from(tasks).where(eq(tasks.planId, planId));
   return toActionPlan(propertyId, savedPlan, savedTasks);
 }

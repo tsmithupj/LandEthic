@@ -28,6 +28,7 @@ export type AiRoute =
   | 'refresh-insights'   // re-run the analysis for an existing property
   | 'generate-plan'      // first plan for a new property
   | 'rebuild-plan'       // rebuild ("restructure") an existing property's plan
+  | 'plan-upgrade'       // expand a plan after moving up to a bigger membership (keeps finished tasks)
   | 'monthly-update'
   | 'habitat-plan'
   | 'replace-task'
@@ -43,6 +44,8 @@ export const MONTHLY_ALLOWANCES: Record<AiRoute, Record<SubscriptionTier, number
   'generate-plan':    { free: 2,  steward: 1,  naturalist: 3,  conservationist: 5 },
   'refresh-insights': { free: 0,  steward: 1,  naturalist: 2,  conservationist: 3 },
   'rebuild-plan':     { free: 0,  steward: 1,  naturalist: 2,  conservationist: 3 },
+  // Free with the upgrade — separate from rebuilds; only possible when the plan is below the membership
+  'plan-upgrade':     { free: 0,  steward: 1,  naturalist: 1,  conservationist: 1 },
   'monthly-update':   { free: 0,  steward: 0,  naturalist: 3,  conservationist: 5 },
   'habitat-plan':     { free: 0,  steward: 0,  naturalist: 0,  conservationist: 2 },
   'replace-task':     { free: 0,  steward: 5,  naturalist: 10, conservationist: 15 },
@@ -55,6 +58,7 @@ const ACTION_LABEL: Record<AiRoute, [one: string, many: string]> = {
   'refresh-insights': ['insight update', 'insight updates'],
   'generate-plan':    ['new plan', 'new plans'],
   'rebuild-plan':     ['plan rebuild', 'plan rebuilds'],
+  'plan-upgrade':     ['plan upgrade', 'plan upgrades'],
   'monthly-update':   ['monthly update', 'monthly updates'],
   'habitat-plan':     ['food plot and nest box plan', 'food plot and nest box plans'],
   'replace-task':     ['task swap', 'task swaps'],

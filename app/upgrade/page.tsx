@@ -114,7 +114,8 @@ function UpgradePageContent() {
           throw new Error(data.error ?? "Could not switch your plan.");
         }
         await user?.reload();
-        router.push("/dashboard");
+        // The dashboard expands their plan to the new membership right away
+        router.push("/dashboard?upgraded=1");
         return;
       }
     } catch (err) {

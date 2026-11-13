@@ -17,7 +17,7 @@ import { ContourLines, Icon, Seal, Spinner } from '@/components/brand';
 
 // ── Stages and progress ──────────────────────────────────────────────────
 
-type Flow = 'new' | 'rebuild';
+export type Flow = 'new' | 'rebuild' | 'upgrade';
 type WorkStage = Exclude<AnalyzeStage, 'idle'>;
 
 interface StageDef {
@@ -70,6 +70,10 @@ const FLOWS: Record<Flow, StageDef[]> = {
     { ...PLANNING, from: 0, to: 95 },
     { ...SAVING, from: 95, to: 99 },
   ],
+  upgrade: [
+    { ...PLANNING, from: 0, to: 95 },
+    { ...SAVING, from: 95, to: 99 },
+  ],
 };
 
 const COPY: Record<Flow, { title: string; subtitle: string }> = {
@@ -80,6 +84,10 @@ const COPY: Record<Flow, { title: string; subtitle: string }> = {
   rebuild: {
     title: 'Rebuilding your plan',
     subtitle: 'We are writing a fresh plan around your goals. This usually takes 1 to 2 minutes.',
+  },
+  upgrade: {
+    title: 'Expanding your plan',
+    subtitle: 'We are adding more tasks, step-by-step how-tos, and time and cost for each — and keeping everything you finished. This usually takes 2 to 3 minutes.',
   },
 };
 

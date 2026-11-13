@@ -222,7 +222,8 @@ export function useFinishCheckout(): boolean {
       if (!mounted.current) return;
       await refreshRef.current();
       setFinishing(false);
-      router.replace('/dashboard');
+      // upgraded=1 → the dashboard expands their plan to the new membership
+      router.replace('/dashboard?upgraded=1');
     })();
   }, [returning, isLoaded, hasUser, sessionId, router]);
 

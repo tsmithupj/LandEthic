@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useMemo, useRef, Suspense, type ComponentType } from 'react';
 import { useStore } from '@/lib/store';
 import type { ActionTask } from '@/types';
@@ -14,6 +14,7 @@ import MonthlyUpdate from '@/components/MonthlyUpdate';
 import { FinishingCheckout, FreePlanBanner, LockedScreen, PaymentIssueBanner, useFinishCheckout } from '@/components/FreePlan';
 import WeeklyChecklist from '@/components/WeeklyChecklist';
 import SectionNav, { type NavSection } from '@/components/SectionNav';
+import PlanUpgradeCard, { planBelowMembership } from '@/components/PlanUpgrade';
 import AppUserButton from '@/components/AppUserButton';
 import AppHeader, { TierTag } from '@/components/AppHeader';
 import { Icon, Seal, Spinner } from '@/components/brand';
@@ -447,7 +448,7 @@ function DashboardPageContent() {
     property, plan, insights, boundary, address,
     propertyEntries, activePropertyId, switchProperty,
     tier, access, canAddProperty, reset,
-    userGoalsText, setUserGoalsText, regeneratePlan, refreshInsights, isAnalyzing, analyzeStage, analyzeError,
+    userGoalsText, setUserGoalsText, regeneratePlan, upgradePlan, refreshInsights, isAnalyzing, analyzeStage, analyzeError,
   } = useStore();
   const [editingGoals, setEditingGoals] = useState(false);
   const [refreshingInsights, setRefreshingInsights] = useState(false);
@@ -482,6 +483,24 @@ function DashboardPageContent() {
   // Landing here straight from a finished Stripe Checkout — switch the new plan on
   // before showing anything (otherwise a just-paid member could see the locked screen).
   const finishingCheckout = useFinishCheckout();
+  const searchParams = useSearchParams();
+
+  // Moved up a membership → expand the plan to it (by tap, or automatically right after upgrading)
+  const [upgrading, setUpgrading] = useState(false);
+  const expandPlan = async () => {
+    setUpgrading(true);
+    try { return await upgradePlan(); } finally { setUpgrading(false); }
+  };
+  const autoExpanded = useRef(false);
+  useEffect(() => {
+    if (autoExpanded.current || finishingCheckout || !plan || searchParams.get('upgraded') !== '1') return;
+    autoExpanded.current = true;
+    router.replace('/dashboard');
+    if (planBelowMembership(plan.tier, tier)) {
+      setUpgrading(true);
+      upgradePlan().finally(() => setUpgrading(false));
+    }
+  }, [finishingCheckout, plan, tier, searchParams, router, upgradePlan]);
 
   // Back from a task page → land on the task that was opened, not the top of the page
   const restoredSpot = useRef(false);
@@ -580,7 +599,7 @@ function DashboardPageContent() {
 
   return (
     <div className="min-h-screen bg-cream-2" onClickCapture={rememberSpot}>
-      <WaitScreen active={isAnalyzing} failed={!!analyzeError} stage={analyzeStage} flow="rebuild" />
+      <WaitScreen active={isAnalyzing} failed={!!analyzeError} stage={analyzeStage} flow={upgrading ? 'upgrade' : 'rebuild'} />
 
       <AppHeader>
         <TierTag label={`${tierLabel} plan`} />
@@ -641,6 +660,9 @@ function DashboardPageContent() {
         {/* Free plan countdown — every visit */}
         <FreePlanBanner />
         <PaymentIssueBanner />
+
+        {/* Moved up a membership — expand the plan to match */}
+        <PlanUpgradeCard onExpand={expandPlan} />
 
         {/* Monthly update — Naturalist / Conservationist */}
         <MonthlyUpdate />
@@ -907,7 +929,7 @@ function DashboardPageContent() {
                 <p className="mt-1 text-sm leading-relaxed text-rust-700">
                   {tier === 'free'
                     ? `Steward is ${formatPrice(planFor('steward').yearly)}/year — a full year of tasks season by season, 20 plant and animal IDs a month, and a plan rebuild every month.`
-                    : `Naturalist is ${formatPrice(planFor('naturalist').yearly)}/year — a month-by-month task calendar, fresh tasks every month, and up to 3 properties.`}
+                    : `Naturalist is ${formatPrice(planFor('naturalist').yearly)}/year — three tasks every month with step-by-step how-to, time, and cost, fresh tasks every month, and up to 3 properties.`}
                 </p>
               </div>
               <span className="flex-shrink-0 text-rust-700"><Icon.Arrow size={22} /></span>

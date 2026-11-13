@@ -137,6 +137,8 @@ interface LandEthicStore {
   // Actions
   analyzeAndPlan:  () => Promise<boolean>;
   regeneratePlan:  (goalsText?: string) => Promise<boolean>;
+  /** After moving up a membership: expand the plan (keeps finished tasks). */
+  upgradePlan:     () => Promise<boolean>;
   refreshInsights: () => Promise<boolean>;
   /** Naturalist+: carry over unfinished tasks and add this month's new ones. */
   monthlyUpdate:   () => Promise<boolean>;
@@ -438,6 +440,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [property, tier, userGoalsText, activePropertyId, activeEntry]);
 
+  // Moved up a membership — expand the plan to it (finished tasks stay)
+  const upgradePlan = useCallback(async (): Promise<boolean> => {
+    if (!activePropertyId) return false;
+    const propertyId = activePropertyId;
+    const fromTier = activeEntry?.plan?.tier;
+    const showPlan = (newPlan: ActionPlan) =>
+      setPropertyEntries((prev) =>
+        prev.map((entry) => (entry.property.id === propertyId ? { ...entry, plan: newPlan } : entry))
+      );
+
+    setIsAnalyzing(true);
+    setAnalyzeStage('planning');
+    setAnalyzeError(null);
+    try {
+      const data = await postJson<{ plan: ActionPlan }>(
+        `/api/properties/${propertyId}/upgrade-plan`,
+        { userGoalsText: userGoalsText || undefined },
+        'Expanding your plan failed',
+      );
+      setAnalyzeStage('saving');
+      showPlan(data.plan);
+      return true;
+    } catch (err) {
+      if (err instanceof ConnectionLost) {
+        // The server finishes and saves it anyway — wait for the bigger plan to show up
+        for (let i = 0; i < 30; i++) {
+          await sleep(10_000);
+          try {
+            const res = await fetch('/api/properties');
+            const data = res.ok ? ((await res.json()) as { entries: PropertyEntry[] }) : null;
+            const saved = data?.entries.find((e) => e.property.id === propertyId)?.plan;
+            if (saved && saved.tier !== fromTier) {
+              showPlan(saved);
+              return true;
+            }
+          } catch {
+            // still offline — keep waiting
+          }
+        }
+        setAnalyzeError('Your bigger plan is taking longer than usual. It will appear here once it\'s ready — check back in a few minutes.');
+        return false;
+      }
+      setAnalyzeError(err instanceof Error ? err.message : 'Expanding your plan failed');
+      return false;
+    } finally {
+      setIsAnalyzing(false);
+      setAnalyzeStage('idle');
+    }
+  }, [activePropertyId, activeEntry, userGoalsText]);
+
   // Monthly update — keeps finished tasks, moves unfinished ones up, adds the new month
   const monthlyUpdate = useCallback(async (): Promise<boolean> => {
     if (!activePropertyId) return false;
@@ -645,7 +697,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         property, plan, insights,
         tier, access, refreshAccess, propertyLimit, canAddProperty,
         isAnalyzing, analyzeStage, analyzeError,
-        analyzeAndPlan, regeneratePlan, refreshInsights, monthlyUpdate, completeTask, toggleTaskStep, replaceTask,
+        analyzeAndPlan, regeneratePlan, upgradePlan, refreshInsights, monthlyUpdate, completeTask, toggleTaskStep, replaceTask,
         switchProperty, removeProperty,
         reset, resetAll,
       }}

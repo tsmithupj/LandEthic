@@ -7,6 +7,7 @@ import { plans, tasks } from '@/lib/db/schema';
 import { toActionPlan, toPropertyProfile, toTaskInsert } from '@/lib/db/mappers';
 import { getOwnedProperty } from '@/lib/db/ownership';
 import { getUserTier } from '@/lib/tier-server';
+import { TIER_ORDER } from '@/lib/tiers';
 import { enforceAiLimit, releaseAiUsage } from '@/lib/rate-limit';
 import { generateMonthlyUpdate } from '@/lib/claude';
 import { fetchSatelliteSnapshot, ringFromPixels } from '@/lib/satellite';
@@ -70,7 +71,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (plan.tier !== tier) {
     return NextResponse.json(
-      { error: 'Your plan was built for a different membership. Tap "Refresh plan" to rebuild it for your current plan.' },
+      {
+        error: TIER_ORDER.indexOf(plan.tier) < TIER_ORDER.indexOf(tier)
+          ? 'Your plan was made for a smaller membership. Tap "Expand my plan" at the top of your dashboard first.'
+          : 'Your plan was built for a different membership. Tap "Refresh plan" to rebuild it for your current plan.',
+      },
       { status: 409 },
     );
   }

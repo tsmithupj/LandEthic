@@ -62,7 +62,8 @@ export const PLANS: PlanInfo[] = [
     tagline: 'A month-by-month calendar for your land.',
     features: [
       'Everything in Steward',
-      'Month-by-month task calendar',
+      'Three tasks every month on a month-by-month calendar',
+      'Step-by-step how-to, time, and cost for every task',
       'Fresh tasks every month, built around what you finished',
       'See how each task moves your land health',
       '30 plant and animal IDs a month',
