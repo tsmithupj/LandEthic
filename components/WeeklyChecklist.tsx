@@ -126,7 +126,7 @@ export default function WeeklyChecklist() {
       ) : (
         <div className="divide-y divide-paper-line">
           {weekTasks.map((task) => (
-            <div key={task.id} className="px-4 py-4 sm:px-5">
+            <div key={task.id} data-spot={`week-${task.id}`} className="px-4 py-4 sm:px-5">
               <div className="flex items-start gap-3">
                 <button
                   onClick={() => completeTask(task.id)}

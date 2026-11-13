@@ -13,6 +13,7 @@ import WaitScreen from '@/components/WaitScreen';
 import MonthlyUpdate from '@/components/MonthlyUpdate';
 import { FinishingCheckout, FreePlanBanner, LockedScreen, PaymentIssueBanner, useFinishCheckout } from '@/components/FreePlan';
 import WeeklyChecklist from '@/components/WeeklyChecklist';
+import SectionNav, { type NavSection } from '@/components/SectionNav';
 import AppUserButton from '@/components/AppUserButton';
 import AppHeader, { TierTag } from '@/components/AppHeader';
 import { Icon, Seal, Spinner } from '@/components/brand';
@@ -107,7 +108,7 @@ function TaskRow({ task }: { task: ActionTask }) {
   };
 
   return (
-    <div className={locked ? 'opacity-55' : ''}>
+    <div className={locked ? 'opacity-55' : ''} data-spot={`plan-${task.id}`}>
       <div className="flex items-start gap-3.5 px-4 py-4 transition-colors hover:bg-cream-2 sm:px-5">
         {/* Checkbox */}
         <button
@@ -382,6 +383,62 @@ function NoProperty() {
   );
 }
 
+// ─── Coming back to where you were ─────────────────────────────────────────
+// Tapping a task (or any link) remembers the spot; coming back to the dashboard
+// (Back button or "Back to plan") scrolls straight to it instead of the top.
+
+const RETURN_KEY = 'landethic_dashboard_spot';
+const RETURN_FOR_MS = 30 * 60 * 1000;
+const FLASH = ['ring-2', 'ring-inset', 'ring-forest-600'];
+
+interface ReturnSpot { propertyId: string; spot: string | null; y: number; at: number }
+
+function saveReturnSpot(spot: ReturnSpot) {
+  try { sessionStorage.setItem(RETURN_KEY, JSON.stringify(spot)); } catch { /* private mode etc. */ }
+}
+
+/** Read (and forget) the saved spot, if it's recent and for this property. */
+function takeReturnSpot(propertyId: string): ReturnSpot | null {
+  try {
+    const raw = sessionStorage.getItem(RETURN_KEY);
+    sessionStorage.removeItem(RETURN_KEY);
+    const spot = raw ? (JSON.parse(raw) as ReturnSpot) : null;
+    if (!spot || spot.propertyId !== propertyId || Date.now() - spot.at > RETURN_FOR_MS) return null;
+    return spot;
+  } catch {
+    return null;
+  }
+}
+
+function goToSpot(spot: ReturnSpot) {
+  const find = () => (spot.spot ? document.querySelector<HTMLElement>(`[data-spot="${CSS.escape(spot.spot)}"]`) : null);
+  const place = () => {
+    const el = find();
+    if (el) el.scrollIntoView({ block: 'center' });
+    else window.scrollTo({ top: spot.y });
+  };
+
+  // The page can still shift for a moment while the map and lists finish loading —
+  // keep it on the spot until the member scrolls or taps themselves.
+  let userMoved = false;
+  const stop = () => { userMoved = true; };
+  const events = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+  events.forEach((ev) => window.addEventListener(ev, stop, { passive: true }));
+  const ro = new ResizeObserver(() => { if (!userMoved) place(); });
+  ro.observe(document.body);
+  setTimeout(() => {
+    ro.disconnect();
+    events.forEach((ev) => window.removeEventListener(ev, stop));
+  }, 2500);
+
+  place();
+  const el = find();
+  if (el) {
+    el.classList.add(...FLASH); // brief outline so the eye finds it
+    setTimeout(() => el.classList.remove(...FLASH), 1800);
+  }
+}
+
 // ─── Dashboard page ────────────────────────────────────────────────────────
 
 function DashboardPageContent() {
@@ -426,6 +483,22 @@ function DashboardPageContent() {
   // before showing anything (otherwise a just-paid member could see the locked screen).
   const finishingCheckout = useFinishCheckout();
 
+  // Back from a task page → land on the task that was opened, not the top of the page
+  const restoredSpot = useRef(false);
+  useEffect(() => {
+    if (restoredSpot.current || !property || finishingCheckout || access?.locked) return;
+    restoredSpot.current = true;
+    const spot = takeReturnSpot(property.id);
+    if (spot) setTimeout(() => goToSpot(spot), 60); // after the page has laid out
+  }, [property, finishingCheckout, access?.locked]);
+
+  const rememberSpot = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!property || !target.closest('a[href^="/"]')) return;
+    const spotEl = target.closest<HTMLElement>('[data-spot]');
+    saveReturnSpot({ propertyId: property.id, spot: spotEl?.dataset.spot ?? null, y: window.scrollY, at: Date.now() });
+  };
+
   // Show switcher for tiers that support multiple properties
   const showSwitcher = (tier === 'naturalist' || tier === 'conservationist') && propertyEntries.length > 0;
   const tierLabel = TIER_LABELS[tier];
@@ -466,6 +539,15 @@ function DashboardPageContent() {
 
   const startNewProperty = () => { reset(); router.push('/onboarding'); };
 
+  const sections: NavSection[] = [
+    { id: 'overview', label: 'Overview' },
+    ...(insights.length > 0 ? [{ id: 'insights', label: 'Property insights' }] : []),
+    ...(tier === 'conservationist'
+      ? [{ id: 'this-week', label: 'This week' }, { id: 'planners', label: 'Planners' }]
+      : []),
+    { id: 'action-plan', label: 'Action plan' },
+  ];
+
   // Secondary actions — shown inline in the header on larger screens and as a
   // scrollable row under it on phones.
   const quickActions = (
@@ -497,7 +579,7 @@ function DashboardPageContent() {
   );
 
   return (
-    <div className="min-h-screen bg-cream-2">
+    <div className="min-h-screen bg-cream-2" onClickCapture={rememberSpot}>
       <WaitScreen active={isAnalyzing} failed={!!analyzeError} stage={analyzeStage} flow="rebuild" />
 
       <AppHeader>
@@ -546,6 +628,9 @@ function DashboardPageContent() {
         </div>
       )}
 
+      {/* Jump to a section without scrolling the whole page */}
+      <SectionNav sections={sections} />
+
       <div className="mx-auto max-w-3xl space-y-5 px-4 py-6 sm:py-8">
         {analyzeError && !isAnalyzing && (
           <div className="rounded-xl border border-rust-600/40 bg-rust-100 px-4 py-3 text-sm text-rust-700">
@@ -561,7 +646,7 @@ function DashboardPageContent() {
         <MonthlyUpdate />
 
         {/* 3D Property Map */}
-        <div ref={mapWrapRef} className="scroll-mt-24">
+        <div ref={mapWrapRef} id="overview" className="scroll-mt-28">
         <DashboardMap
           boundary={boundary}
           address={address}
@@ -656,7 +741,7 @@ function DashboardPageContent() {
 
         {/* AI Insights */}
         {insights.length > 0 && (
-          <div className="card p-5">
+          <div id="insights" className="card scroll-mt-28 p-5">
             <p className="eyebrow">Property insights</p>
             <p className="mb-4 mt-1 text-xs text-ink-soft">
               What we found on your land, exactly where it is, and what to do about it.
@@ -778,14 +863,14 @@ function DashboardPageContent() {
         )}
 
         {/* This week's checklist + habitat planners — Conservationist */}
-        {tier === 'conservationist' && <WeeklyChecklist />}
+        {tier === 'conservationist' && <div id="this-week" className="scroll-mt-28"><WeeklyChecklist /></div>}
         {tier === 'conservationist' && (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div id="planners" className="grid scroll-mt-28 gap-3 sm:grid-cols-2">
             {[
               { href: '/dashboard/food-plots', Icon: Icon.Sprout, title: 'Food plot planner', text: 'What to plant, how much seed, and where each plot goes.' },
               { href: '/dashboard/nesting-boxes', Icon: Icon.Bird, title: 'Nesting box planner', text: 'Which boxes to put up, how high, and exactly where.' },
             ].map(({ href, Icon: TileIcon, title, text }) => (
-              <Link key={href} href={href} className="card group flex items-start gap-3 p-4 transition-colors hover:bg-cream-2">
+              <Link key={href} href={href} data-spot={`tile-${href}`} className="card group flex items-start gap-3 p-4 transition-colors hover:bg-cream-2">
                 <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-forest-50 text-forest-700">
                   <TileIcon size={18} />
                 </span>
@@ -800,11 +885,13 @@ function DashboardPageContent() {
         )}
 
         {/* Action plan — grouped by month (Naturalist/Conservationist) or season (Steward) or flat (Free) */}
-        <ActionPlanSection
-          unlockedTasks={freeTasks}
-          lockedTasks={lockedTasks}
-          tier={tier}
-        />
+        <div id="action-plan" className="scroll-mt-28">
+          <ActionPlanSection
+            unlockedTasks={freeTasks}
+            lockedTasks={lockedTasks}
+            tier={tier}
+          />
+        </div>
 
         {/* Upgrade CTA — only shown for free/steward, points at the next tier */}
         {(tier === 'free' || tier === 'steward') && (
