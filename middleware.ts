@@ -6,12 +6,14 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 const isPublicRoute = createRouteMatcher([
   '/api/stripe/webhook(.*)',
   '/api/cron(.*)', // Vercel Cron — checked against CRON_SECRET inside the route
+  '/api/report',   // "Report a problem" also works from crash screens and signed-out pages (rate-limited inside)
 ]);
 
 // Non-API page routes that require a signed-in user
 const isProtectedPageRoute = createRouteMatcher([
   '/onboarding(.*)',
   '/dashboard(.*)',
+  '/admin(.*)',
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

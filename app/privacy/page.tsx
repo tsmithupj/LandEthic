@@ -55,12 +55,13 @@ export default function PrivacyPage() {
                 <li><strong>Account details</strong> — your name, email address, and (if you sign in with Google) basic Google profile information.</li>
                 <li><strong>Property details</strong> — the address you enter, the property boundary you confirm or draw, acreage, the goals you pick, and anything you write about your plans for the land.</li>
                 <li><strong>Questions and photos</strong> — questions you ask about a task, and photos you upload to identify a plant or animal.</li>
+                <li><strong>Problem reports</strong> — if you use &ldquo;Report a problem,&rdquo; what you write, the error you saw, the page you were on, your browser and screen size, and the app&apos;s last few requests, so we can find and fix the problem.</li>
                 <li><strong>Billing details</strong> — if you choose a paid plan, your payment details go straight to Stripe. We only keep your Stripe customer ID, which plan you are on, and its status and renewal date.</li>
               </ul>
               <h3>Information we create or collect automatically</h3>
               <ul>
                 <li><strong>Your plan</strong> — the land analysis, insights, land health score, and tasks we generate for you, plus which tasks you mark done.</li>
-                <li><strong>Usage counts</strong> — a simple log of when you use AI features (for example, building a plan), so we can apply fair daily limits.</li>
+                <li><strong>Usage counts</strong> — a simple log of when you use AI features (for example, building a plan), so we can apply fair monthly limits.</li>
                 <li><strong>Technical data</strong> — standard web logs kept by our host, such as IP address, browser type, and the pages you visit.</li>
               </ul>
               <p>

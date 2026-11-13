@@ -5,6 +5,7 @@ import { useStore } from '@/lib/store';
 import { TIER_ORDER } from '@/lib/tiers';
 import { TIER_LABELS } from '@/lib/pricing';
 import { Icon, Spinner } from '@/components/brand';
+import { ReportLink } from '@/components/ReportProblem';
 import type { SubscriptionTier } from '@/types';
 
 /** What a bigger plan adds, in plain words. */
@@ -24,8 +25,8 @@ export function planBelowMembership(planTier: SubscriptionTier | undefined, tier
  * is expanded to match. Finished tasks stay; it doesn't use up a plan rebuild.
  */
 export default function PlanUpgradeCard({ onExpand }: { onExpand: () => Promise<boolean> }) {
-  const { plan, tier, isAnalyzing } = useStore();
-  const [error, setError] = useState<string | null>(null);
+  const { plan, tier, isAnalyzing, analyzeError } = useStore();
+  const [failed, setFailed] = useState(false);
   if (!plan || tier === 'free' || !planBelowMembership(plan.tier, tier)) return null;
   const done = plan.tasks.filter((t) => t.completed).length;
 
@@ -43,12 +44,18 @@ export default function PlanUpgradeCard({ onExpand }: { onExpand: () => Promise<
             Your current plan was made for {TIER_LABELS[plan.tier]}. Expand it to get {WHAT_YOU_GET[tier]}.
             {done === 1 ? ' The task you already finished stays on your plan.' : done > 1 ? ` The ${done} tasks you already finished stay on your plan.` : ''}
           </p>
-          {error && <p className="mt-2 text-xs text-rust-700">{error}</p>}
+          {failed && !isAnalyzing && (
+            <div className="mt-2 text-xs text-rust-700">
+              {/* The real reason from the server, e.g. "used this month's plan upgrade" */}
+              <p>{analyzeError ?? 'Could not expand your plan. Try again in a minute.'}</p>
+              <ReportLink error={analyzeError ?? 'Expand my plan failed'} className="mt-1" />
+            </div>
+          )}
           <button
             onClick={async () => {
-              setError(null);
+              setFailed(false);
               const ok = await onExpand();
-              if (!ok) setError('Could not expand your plan. Try again in a minute.');
+              if (!ok) setFailed(true);
             }}
             disabled={isAnalyzing}
             className="btn-primary mt-3 !py-2 !text-sm"

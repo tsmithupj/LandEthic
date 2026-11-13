@@ -9,6 +9,7 @@ import AppHeader from '@/components/AppHeader';
 import { Icon, Seal, Spinner } from '@/components/brand';
 import { clipToProperty } from '@/lib/geo';
 import { useRedirectWhenLocked } from '@/components/FreePlan';
+import { ReportLink } from '@/components/ReportProblem';
 
 const DashboardMap = dynamic(() => import('@/components/DashboardMap'), { ssr: false });
 
@@ -432,7 +433,10 @@ export default function HabitatPlanner({ kind }: { kind: Kind }) {
         </div>
 
         {error && (
-          <div className="rounded-xl border border-rust-600/40 bg-rust-100 px-4 py-3 text-sm text-rust-700">{error}</div>
+          <div className="rounded-xl border border-rust-600/40 bg-rust-100 px-4 py-3 text-sm text-rust-700">
+            {error}
+            <div className="mt-1.5"><ReportLink error={error} /></div>
+          </div>
         )}
 
         {/* Loading saved plan */}

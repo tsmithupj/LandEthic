@@ -18,6 +18,7 @@ import PlanUpgradeCard, { planBelowMembership } from '@/components/PlanUpgrade';
 import AppUserButton from '@/components/AppUserButton';
 import AppHeader, { TierTag } from '@/components/AppHeader';
 import { Icon, Seal, Spinner } from '@/components/brand';
+import { ReportLink } from '@/components/ReportProblem';
 
 const DashboardMap = dynamic(() => import('@/components/DashboardMap'), { ssr: false });
 
@@ -180,7 +181,7 @@ function TaskRow({ task }: { task: ActionTask }) {
               )}
             </button>
           )}
-          {replaceError && <p className="mt-1.5 text-xs text-rust-700">{replaceError}</p>}
+          {replaceError && <p className="mt-1.5 text-xs text-rust-700">{replaceError} <ReportLink error={replaceError} className="ml-1" /></p>}
         </div>
 
         <span className="mt-1 flex-shrink-0 text-ink-faint" aria-hidden="true">
@@ -654,6 +655,7 @@ function DashboardPageContent() {
         {analyzeError && !isAnalyzing && (
           <div className="rounded-xl border border-rust-600/40 bg-rust-100 px-4 py-3 text-sm text-rust-700">
             {analyzeError}
+            <div className="mt-1.5"><ReportLink error={analyzeError} /></div>
           </div>
         )}
 
@@ -953,6 +955,11 @@ function DashboardPageContent() {
             </div>
           </Link>
         )}
+
+        {/* Always-there way to tell us something's wrong */}
+        <p className="pt-2 text-center text-xs text-ink-faint">
+          Something not working right? <ReportLink label="Report a problem" className="!font-semibold" />
+        </p>
       </div>
     </div>
   );

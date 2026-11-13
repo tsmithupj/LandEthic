@@ -44,8 +44,9 @@ export const MONTHLY_ALLOWANCES: Record<AiRoute, Record<SubscriptionTier, number
   'generate-plan':    { free: 2,  steward: 1,  naturalist: 3,  conservationist: 5 },
   'refresh-insights': { free: 0,  steward: 1,  naturalist: 2,  conservationist: 3 },
   'rebuild-plan':     { free: 0,  steward: 1,  naturalist: 2,  conservationist: 3 },
-  // Free with the upgrade — separate from rebuilds; only possible when the plan is below the membership
-  'plan-upgrade':     { free: 0,  steward: 1,  naturalist: 1,  conservationist: 1 },
+  // Free with each step up — separate from rebuilds, and only possible while the plan is below the
+  // membership. Counted across steps, so Free → Steward → Naturalist → Conservationist fits in one month.
+  'plan-upgrade':     { free: 0,  steward: 1,  naturalist: 2,  conservationist: 3 },
   'monthly-update':   { free: 0,  steward: 0,  naturalist: 3,  conservationist: 5 },
   'habitat-plan':     { free: 0,  steward: 0,  naturalist: 0,  conservationist: 2 },
   'replace-task':     { free: 0,  steward: 5,  naturalist: 10, conservationist: 15 },

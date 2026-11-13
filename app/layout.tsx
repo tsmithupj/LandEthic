@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { StoreProvider } from "@/lib/store";
+import { ReportProblemProvider } from "@/components/ReportProblem";
 
 const arvo = Arvo({
   subsets: ["latin"],
@@ -57,7 +58,9 @@ export default function RootLayout({
         className={`h-full antialiased ${arvo.variable} ${publicSans.variable}`}
       >
         <body className="min-h-full flex flex-col bg-cream text-ink">
-          <StoreProvider>{children}</StoreProvider>
+          <ReportProblemProvider>
+            <StoreProvider>{children}</StoreProvider>
+          </ReportProblemProvider>
         </body>
       </html>
     </ClerkProvider>

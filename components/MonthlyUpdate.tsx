@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useStore } from '@/lib/store';
 import { MONTHLY_PLAN, monthLabel, monthNumOf, monthlyUpdateDue, parseMonthKey } from '@/lib/months';
 import { Icon, Spinner } from '@/components/brand';
+import { ReportLink } from '@/components/ReportProblem';
 
 /**
  * Naturalist / Conservationist monthly update.
@@ -34,7 +35,7 @@ export default function MonthlyUpdate() {
               We&rsquo;ll move anything you didn&rsquo;t get to in {lastMonth} into {month}, add fresh tasks through {newEnd}{' '}
               built around what you finished, and keep everything you already checked off.
             </p>
-            {error && <p className="mt-2 text-xs text-rust-700">{error}</p>}
+            {error && <p className="mt-2 text-xs text-rust-700">{error} <ReportLink error={error} className="ml-1" /></p>}
             <button
               onClick={async () => {
                 setError(null);

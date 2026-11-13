@@ -140,3 +140,25 @@ export const habitatPlans = pgTable('habitat_plans', {
   nestingBoxNote: text('nesting_box_note'),
   generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// "Report a problem" — what a member sent us when something went wrong, with the
+// error and technical details captured automatically. Reviewed at /admin/reports.
+export const problemReports = pgTable('problem_reports', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clerkUserId: text('clerk_user_id'),
+  email: text('email'),
+  tier: text('tier'),
+  page: text('page'),
+  /** What the member typed. */
+  message: text('message'),
+  /** The error they saw (or the crash message). */
+  error: text('error'),
+  /** Browser, screen, app version, recent requests and errors. */
+  details: jsonb('details').$type<Record<string, unknown>>(),
+  /** Hash of the sender's IP — only used to stop floods of reports. */
+  ipHash: text('ip_hash'),
+  status: text('status').notNull().default('new'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('problem_reports_created_idx').on(t.createdAt),
+]);

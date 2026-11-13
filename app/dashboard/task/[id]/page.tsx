@@ -12,6 +12,7 @@ import { StepList } from '@/components/WeeklyChecklist';
 import { clipToProperty } from '@/lib/geo';
 import { useRedirectWhenLocked } from '@/components/FreePlan';
 import { Icon, Spinner } from '@/components/brand';
+import { ReportLink } from '@/components/ReportProblem';
 
 const DashboardMap = dynamic(() => import('@/components/DashboardMap'), { ssr: false });
 
@@ -384,7 +385,7 @@ export default function TaskDetailPage() {
                     <Spinner /> Looking at your photo&hellip;
                   </div>
                 )}
-                {idError && <p className="text-center text-xs text-rust-700">{idError}</p>}
+                {idError && <p className="text-center text-xs text-rust-700">{idError} <ReportLink error={idError} className="ml-1" /></p>}
                 {idResults && idResults.length === 0 && (
                   <p className="text-center text-xs text-ink-soft">We couldn&apos;t confidently identify this one. Try a closer photo in good light.</p>
                 )}
@@ -447,7 +448,7 @@ export default function TaskDetailPage() {
                 )}
               </button>
               {replaceError && (
-                <p className="mt-1.5 text-center text-xs text-rust-700">{replaceError}</p>
+                <p className="mt-1.5 text-center text-xs text-rust-700">{replaceError} <ReportLink error={replaceError} className="ml-1" /></p>
               )}
             </div>
           )}

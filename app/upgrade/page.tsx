@@ -8,6 +8,7 @@ import { PLANS, TIER_LABELS, FREE_PLAN_DAYS, DATA_KEEP_DAYS, formatPrice, yearly
 import type { SubscriptionTier } from "@/types";
 import AppHeader from "@/components/AppHeader";
 import { ContourLines, Icon, Spinner } from "@/components/brand";
+import { ReportLink } from '@/components/ReportProblem';
 
 interface BillingStatus {
   status: string | null;
@@ -203,7 +204,10 @@ function UpgradePageContent() {
         )}
 
         {error && (
-          <p className="mb-6 rounded-xl border border-rust-600/40 bg-rust-100 px-4 py-3 text-center text-sm text-rust-700">{error}</p>
+          <div className="mb-6 rounded-xl border border-rust-600/40 bg-rust-100 px-4 py-3 text-center text-sm text-rust-700">
+            {error}
+            <div className="mt-1.5"><ReportLink error={error} /></div>
+          </div>
         )}
 
         {/* Monthly / yearly */}

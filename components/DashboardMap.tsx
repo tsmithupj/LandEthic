@@ -3,6 +3,7 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 import { Icon } from '@/components/brand';
+import { ReportLink } from '@/components/ReportProblem';
 import { clipToProperty, shapeCenter, shapePoints } from '@/lib/geo';
 
 interface DashboardMapProps {
@@ -463,10 +464,10 @@ function DashboardMapInner({
 }
 
 /** If the map ever fails, show a quiet placeholder instead of taking the whole page down. */
-class MapErrorBoundary extends Component<{ height: number; children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() {
-    return { failed: true };
+class MapErrorBoundary extends Component<{ height: number; children: ReactNode }, { failed: boolean; message: string }> {
+  state = { failed: false, message: '' };
+  static getDerivedStateFromError(err: unknown) {
+    return { failed: true, message: `Map error: ${err instanceof Error ? err.message : String(err)}` };
   }
   componentDidCatch(err: unknown) {
     console.warn('[map] the map stopped working:', err);
@@ -475,10 +476,11 @@ class MapErrorBoundary extends Component<{ height: number; children: ReactNode }
     if (this.state.failed) {
       return (
         <div
-          className="flex items-center justify-center rounded-2xl bg-forest-900 text-sm text-forest-200"
+          className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-forest-900 px-4 text-center text-sm text-forest-200"
           style={{ height: this.props.height }}
         >
           The map couldn&apos;t load. Refresh the page to try again.
+          <ReportLink error={this.state.message || 'The map stopped working'} className="!text-forest-200" />
         </div>
       );
     }

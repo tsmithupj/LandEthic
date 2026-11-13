@@ -10,6 +10,7 @@ import { TIER_LABELS } from '@/lib/pricing';
 import AppHeader from '@/components/AppHeader';
 import WaitScreen from '@/components/WaitScreen';
 import { Icon, Seal, Spinner } from '@/components/brand';
+import { ReportLink } from '@/components/ReportProblem';
 
 const ParcelConfirmMap = dynamic(() => import('@/components/ParcelConfirmMap'), { ssr: false });
 
@@ -352,7 +353,8 @@ function StepGenerating({ error, onRetry, onBack }: { error: string | null; onRe
       <div className="py-6 text-center">
         <div className="mb-5"><Seal tone="rust" size={60}><Icon.Warning size={26} /></Seal></div>
         <h2 className="mb-3 text-xl font-bold text-ink">Something went wrong</h2>
-        <p className="mb-6 rounded-xl border border-rust-600/40 bg-rust-100 px-4 py-3 text-sm text-rust-700">{error}</p>
+        <p className="mb-3 rounded-xl border border-rust-600/40 bg-rust-100 px-4 py-3 text-sm text-rust-700">{error}</p>
+        <div className="mb-6"><ReportLink error={error} /></div>
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-center">
           <button onClick={onBack} className="btn-outline !py-3 !text-sm">Change my goals</button>
           <button onClick={onRetry} className="btn-primary !py-3 !text-sm">

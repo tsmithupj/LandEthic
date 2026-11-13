@@ -7,6 +7,7 @@ import { readImageForUpload } from '@/lib/image';
 import AppHeader from '@/components/AppHeader';
 import { useRedirectWhenLocked } from '@/components/FreePlan';
 import { Icon, Seal, Spinner } from '@/components/brand';
+import { ReportLink } from '@/components/ReportProblem';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -229,6 +230,7 @@ function IdentifyPanel({
           {error && (
             <div className="rounded-xl border border-rust-600/40 bg-rust-100 px-4 py-3 text-sm text-rust-700">
               {error}
+              <div className="mt-1.5"><ReportLink error={error} /></div>
             </div>
           )}
 

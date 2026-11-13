@@ -8,6 +8,7 @@ import { useStore } from '@/lib/store';
 import { startCheckout } from '@/lib/checkout';
 import { DATA_KEEP_DAYS, formatPrice, planFor } from '@/lib/pricing';
 import { Icon, Seal, Spinner } from '@/components/brand';
+import { ReportLink } from '@/components/ReportProblem';
 
 function day(iso: string | null | undefined): string {
   return iso ? new Date(iso).toLocaleDateString('en-US', { month: 'long', day: 'numeric' }) : '';
@@ -32,7 +33,7 @@ function KeepPlanButton({ label }: { label?: string }) {
       >
         {busy ? <><Spinner className="h-4 w-4" /> Opening checkout…</> : <>{label ?? `Keep my plan — ${formatPrice(steward.yearly)}/year`} <Icon.Arrow size={16} /></>}
       </button>
-      {error && <p className="mt-2 text-xs text-rust-700">{error}</p>}
+      {error && <p className="mt-2 text-xs text-rust-700">{error} <ReportLink error={error} className="ml-1" /></p>}
     </div>
   );
 }
@@ -159,7 +160,7 @@ export function PaymentIssueBanner() {
       >
         {busy ? <><Spinner className="h-4 w-4" /> Opening billing…</> : <>Update payment <Icon.Arrow size={16} /></>}
       </button>
-      {error && <p className="mt-2 text-xs text-rust-700">{error}</p>}
+      {error && <p className="mt-2 text-xs text-rust-700">{error} <ReportLink error={error} className="ml-1" /></p>}
     </div>
   );
 }
