@@ -672,6 +672,9 @@ function DashboardPageContent() {
         {/* 3D Property Map */}
         <div ref={mapWrapRef} id="overview" className="scroll-mt-28">
         <DashboardMap
+          // A fresh map for each property — the map is set up once, so switching
+          // properties must start a new one (location, outline, flyover)
+          key={property.id}
           boundary={boundary}
           address={address}
           propertyName={property.name}
