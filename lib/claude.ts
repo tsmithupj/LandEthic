@@ -305,15 +305,34 @@ function userContent(prompt: string, satelliteImageBase64?: string) {
     : prompt;
 }
 
-export async function generatePlan(input: PlanInput): Promise<ActionPlan> {
-  const { profile, tier } = input;
-  const month    = input.currentMonth  ?? new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
-  const season   = input.currentSeason ?? getCurrentSeason();
-  const withPhoto = !!input.satelliteImageBase64;
+type PaidTier = Exclude<SubscriptionTier, 'free'>;
 
-  const prompt = `Generate a land management action plan for this property.
+/** How many tasks a paid plan has, and when — the outline step. */
+const TIER_OUTLINE: Record<PaidTier, string> = {
+  steward: 'Plan 14 tasks, one per month across all 4 seasons of the next year: 3 Spring, 3 Summer, 4 Fall, 4 Winter. Give each one a specific month within its season (e.g. "March 2027").',
+  naturalist: 'Plan exactly 18 tasks: exactly 3 per month for each of the next 6 consecutive months, starting with the current month.',
+  conservationist: 'Plan exactly 21 tasks: exactly 7 per month for each of the next 3 consecutive months, starting with the current month. Give every task a "week" (1, 2, 3, or 4) of its month — spread each month across the 4 weeks (1–2 per week), with time-sensitive or prep work first.',
+};
 
-${propertyBlock(profile, input.userGoalsText)}
+/** What every task's write-up includes, by membership — the detail step. */
+const TIER_DETAIL: Record<PaidTier, string> = {
+  steward: 'For each task include a "photoPrompt" in recommendations: one sentence on what to photograph for species ID.',
+  naturalist: `Include an "impactNote" in recommendations for every task. ${HOW_TO_STEPS} ${TIME_AND_COST}`,
+  conservationist: `For food plot tasks add specific seed variety names, seeding rates (lbs/acre), and planting windows to recommendations.species. For nesting box tasks add exact height (feet), compass direction, and distance from tree line to recommendations.placement. Include an "impactNote" for every task. Give every task 3–6 "steps": short check-off items in the order they are done, each one a single action with amounts or sizes where it helps (e.g. "Buy 50 lbs of Durana white clover seed", "Disk the plot twice, 4 inches deep"). ${TIME_AND_COST}`,
+};
+
+/** Most tasks written in one detail call — several calls run at the same time. */
+const DETAIL_BATCH = 7;
+
+// The outline (which jobs, in what order) is the judgment call → Opus.
+// Writing each planned job up in detail → Sonnet: about twice as fast and 40% cheaper.
+const OUTLINE_MODEL = 'claude-opus-4-6';
+const DETAIL_MODEL = 'claude-sonnet-4-6';
+
+interface OutlineTask { title: string; month: string; season?: string; week?: number }
+
+function planIntro(input: PlanInput, month: string, season: string, withPhoto: boolean): string {
+  return `${propertyBlock(input.profile, input.userGoalsText)}
 - Current month: ${month} (${season})
 ${withPhoto ? `
 ${photoIntro(!!input.hasBoundary)}
@@ -321,7 +340,65 @@ ${photoIntro(!!input.hasBoundary)}
 ${input.completedTitles?.length ? `TASKS THEY HAVE ALREADY FINISHED (they stay on their plan — never repeat these; where it fits, the next step after one of them is a great task):
 ${input.completedTitles.slice(0, 40).map((t) => `- ${t}`).join('\n')}
 
-` : ''}TIER INSTRUCTIONS: ${TIER_DEPTH[tier]}
+` : ''}`;
+}
+
+async function askJson<T>(prompt: string, maxTokens: number, image?: string, model = OUTLINE_MODEL): Promise<T> {
+  const message = await client.messages.create({
+    model,
+    max_tokens: maxTokens,
+    system: SYSTEM,
+    messages: [{ role: 'user', content: userContent(prompt, image) }],
+  });
+  const text = message.content[0]?.type === 'text' ? message.content[0].text : '';
+  return JSON.parse(stripCodeFences(text)) as T;
+}
+
+/** Group outline tasks into detail batches, keeping each month together where it fits. */
+function batchByMonth(tasks: OutlineTask[]): OutlineTask[][] {
+  const batches: OutlineTask[][] = [];
+  let current: OutlineTask[] = [];
+  const months = new Map<string, OutlineTask[]>();
+  for (const t of tasks) months.set(t.month, [...(months.get(t.month) ?? []), t]);
+  for (const group of months.values()) {
+    for (let i = 0; i < group.length; i += DETAIL_BATCH) {
+      const part = group.slice(i, i + DETAIL_BATCH);
+      if (current.length + part.length > DETAIL_BATCH) { batches.push(current); current = []; }
+      current.push(...part);
+    }
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+/**
+ * Build an action plan.
+ *
+ * Paid plans are written in two steps so they finish well inside the 5-minute
+ * server limit: first a quick outline (summary + every task's title and month),
+ * then the full write-ups for a few months at a time, all at once. The outline
+ * keeps the batches from repeating each other.
+ */
+export async function generatePlan(input: PlanInput): Promise<ActionPlan> {
+  const { profile, tier } = input;
+  const month    = input.currentMonth  ?? new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
+  const season   = input.currentSeason ?? getCurrentSeason();
+  const withPhoto = !!input.satelliteImageBase64;
+  const intro = planIntro(input, month, season, withPhoto);
+  const finish = (summary: string, tasks: Partial<ActionTask>[]): ActionPlan => ({
+    id: `plan-${Date.now()}`,
+    propertyId: profile.id,
+    tier,
+    generatedAt: new Date().toISOString(),
+    summary,
+    tasks: tasks.map((t, i) => normalizeTask({ ...t, id: `task-${i + 1}` } as ActionTask, tier, profile.id)),
+  });
+
+  // Free: 5 quick tasks — one call is plenty fast
+  if (tier === 'free') {
+    const raw = await askJson<{ summary: string; tasks: Omit<ActionTask, 'id'>[] }>(`Generate a land management action plan for this property.
+
+${intro}TIER INSTRUCTIONS: ${TIER_DEPTH.free}
 
 Return ONLY this JSON (no markdown):
 {
@@ -331,29 +408,73 @@ Return ONLY this JSON (no markdown):
   ]
 }
 
+${locationRules(withPhoto)}`, 8000, input.satelliteImageBase64);
+    return finish(raw.summary, raw.tasks);
+  }
+
+  const paid = tier as PaidTier;
+  const weekly = paid === 'conservationist';
+
+  // ── Step 1: the outline ────────────────────────────────────────────────
+  const outline = await askJson<{ summary: string; tasks: OutlineTask[] }>(`Plan a land management action plan for this property.
+
+${intro}PLAN SHAPE: ${TIER_OUTLINE[paid]}
+Pick the jobs that do the most for this owner's goals on THIS land, in a sensible order (prep before planting, each job in its right season). No two tasks may be the same job.
+
+Return ONLY this JSON (no markdown):
+{
+  "summary": "2–3 sentence plain-English overview of this property's biggest opportunities right now",
+  "tasks": [
+    { "title": "clear action title (verb + what + where)", "month": "exact month, e.g. ${month}", "season": "Spring, Summer, Fall, or Winter"${weekly ? ', "week": 1' : ''} }
+  ]
+}`, 3000, input.satelliteImageBase64);
+
+  const planned = (outline.tasks ?? []).filter((t) => t && typeof t.title === 'string' && t.title.trim() && typeof t.month === 'string');
+  if (!planned.length) throw new Error('The plan outline came back empty');
+  const allTitles = planned.map((t) => `- ${t.title} (${t.month})`).join('\n');
+
+  // ── Step 2: write the tasks up, a few months at a time, in parallel ─────
+  const writeBatch = async (batch: OutlineTask[]): Promise<Partial<ActionTask>[]> => {
+    const prompt = `Write the full details for some of the tasks in this landowner's action plan.
+
+${intro}THE WHOLE PLAN (for context — the other tasks are being written separately, so don't overlap with them):
+${allTitles}
+
+WRITE THESE ${batch.length} TASKS, in this order, keeping each title and month${weekly ? ' and week' : ''} exactly as given:
+${batch.map((t, i) => `${i + 1}. ${t.title} — ${t.month}${weekly && t.week ? ` (week ${t.week})` : ''}`).join('\n')}
+
+DETAIL RULES: ${TIER_DETAIL[paid]} All tasks must have tier: "${tier}".
+
+Return ONLY this JSON (no markdown):
+{
+  "tasks": [
+    ${taskSchema({ tier, propertyId: profile.id, withArea: withPhoto })}
+  ]
+}
+
 ${locationRules(withPhoto)}`;
-
-  const message = await client.messages.create({
-    model: 'claude-opus-4-6',
-    max_tokens: 16384,
-    system: SYSTEM,
-    messages: [{ role: 'user', content: userContent(prompt, input.satelliteImageBase64) }],
-  });
-
-  const text = message.content[0].type === 'text' ? message.content[0].text : '';
-  const raw = JSON.parse(stripCodeFences(text)) as {
-    summary: string;
-    tasks: Omit<ActionTask, 'id'>[];
+    const maxTokens = Math.min(12000, 1500 + batch.length * 1000);
+    let raw: { tasks?: Partial<ActionTask>[] };
+    try {
+      raw = await askJson(prompt, maxTokens, input.satelliteImageBase64, DETAIL_MODEL);
+    } catch {
+      raw = await askJson(prompt, maxTokens, input.satelliteImageBase64, DETAIL_MODEL); // one retry
+    }
+    const written = Array.isArray(raw.tasks) ? raw.tasks : [];
+    // Keep the outline's title, month, season and week — they were planned together
+    return batch.map((planned, i) => ({
+      ...(written[i] ?? {}),
+      title: planned.title,
+      month: planned.month,
+      season: planned.season ?? written[i]?.season,
+      ...(weekly && planned.week ? { week: planned.week } : {}),
+    }))
+      .filter((t) => typeof t.description === 'string' && t.description.trim());
   };
 
-  return {
-    id: `plan-${Date.now()}`,
-    propertyId: profile.id,
-    tier,
-    generatedAt: new Date().toISOString(),
-    summary: raw.summary,
-    tasks: raw.tasks.map((t, i) => normalizeTask({ ...t, id: `task-${i + 1}` }, tier, profile.id)),
-  };
+  const written = (await Promise.all(batchByMonth(planned).map(writeBatch))).flat();
+  if (!written.length) throw new Error('No tasks came back from the plan write-up');
+  return finish(outline.summary, written);
 }
 
 // ─── Monthly Update (Naturalist / Conservationist) ─────────────────────────
